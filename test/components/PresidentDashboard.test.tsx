@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { FinanceProvider, useFinance } from "../../src/context/finance-context"
 import React from 'react'
-import type { ReactNode } from 'react'
 
 const mockChain = vi.hoisted(() => ({
   from: vi.fn().mockReturnThis(),
@@ -26,23 +25,12 @@ vi.mock("../../src/lib/supabase", () => ({
   supabase: mockChain
 }))
 
-const MockAuthProvider = ({ children }: { children: ReactNode }) => <>{children}</>;
-
-vi.mock("../../src/context/auth-context", () => ({
-  AuthProvider: MockAuthProvider,
-  useAuth: () => ({ user: { id: 'test-org-id' } })
-}));
-
 describe("President Dashboard Persistence", () => {
   beforeEach(() => vi.clearAllMocks())
 
   it("calls supabase.update when updating expense status", async () => {
     const { result } = renderHook(() => useFinance(), {
-      wrapper: ({ children }) => (
-        <MockAuthProvider>
-          <FinanceProvider>{children}</FinanceProvider>
-        </MockAuthProvider>
-      )
+      wrapper: ({ children }) => <FinanceProvider>{children}</FinanceProvider>
     })
 
     await waitFor(() => expect(result.current.expenses).toBeDefined())

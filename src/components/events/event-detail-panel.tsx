@@ -29,13 +29,9 @@ import {
   Calendar,
   Tag,
   User,
-  Link2,
-  Copy,
-  Check,
 } from "lucide-react"
 import { format } from "date-fns"
 import { AddToGoogleCalendar } from "@/components/events/add-to-google-calendar"
-import { useState } from "react"
 
 interface EventDetailPanelProps {
   open: boolean
@@ -53,7 +49,6 @@ export function EventDetailPanel({
   onDelete,
 }: EventDetailPanelProps) {
   const { members } = useMembers()
-  const [copiedRsvp, setCopiedRsvp] = useState(false)
 
   // Build collaborator list from dynamic members
   const dynamicCollaborators: Collaborator[] = members.map((m) => ({
@@ -266,37 +261,6 @@ export function EventDetailPanel({
           )}
 
           <Separator />
-
-          {/* Public RSVP share link (only when the event is publicly visible) */}
-          {event.isPublic && (
-            <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
-              <div className="flex items-center gap-2 text-xs font-medium text-primary uppercase tracking-wider">
-                <Link2 className="h-3.5 w-3.5" />
-                Public RSVP page
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Share this link in newsletters, group chats, or socials. Attendees can RSVP without a ClubRM account.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start gap-2 font-mono text-[11px]"
-                onClick={async () => {
-                  const url = `${window.location.origin}/rsvp/${event.id}`
-                  try {
-                    await navigator.clipboard.writeText(url)
-                    setCopiedRsvp(true)
-                    setTimeout(() => setCopiedRsvp(false), 2000)
-                  } catch {
-                    window.prompt("Copy this RSVP link:", url)
-                  }
-                }}
-              >
-                {copiedRsvp ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                {copiedRsvp ? "Copied to clipboard" : `${window.location.origin}/rsvp/${event.id}`}
-              </Button>
-            </div>
-          )}
 
           {/* Google Calendar sync */}
           <AddToGoogleCalendar event={event} />

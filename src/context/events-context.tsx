@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react"
+import { logError } from "@/lib/logger"
 import { type CalendarEvent } from "@/components/events/types"
 import { supabase } from "@/lib/supabase"
-import { useAuth } from "@/context/auth-context"
+import { useAuth } from "./auth-context"
 
 const today = new Date()
 const year = today.getFullYear()
@@ -224,7 +225,7 @@ function toEvent(row: Record<string, unknown>): CalendarEvent {
   }
 }
 
-function toRow(e: CalendarEvent, orgId: string | null = null) {
+function toRow(e: CalendarEvent) {
   const start = e.startDate ? new Date(e.startDate) : new Date()
   const end = e.endDate ? new Date(e.endDate) : new Date()
   
@@ -243,7 +244,6 @@ function toRow(e: CalendarEvent, orgId: string | null = null) {
     registered: e.registered ?? null,
     is_public: e.isPublic ?? true,
     status: e.status || "confirmed",
-    organization_id: orgId,
   }
 }
 
@@ -259,68 +259,71 @@ interface EventsContextType {
 const EventsContext = createContext<EventsContextType | undefined>(undefined)
 
 export function EventsProvider({ children, initialEvents = [] }: { children: React.ReactNode, initialEvents?: CalendarEvent[] }) {
-  const { user } = useAuth()
   const [events, setEvents] = useState<CalendarEvent[]>(initialEvents)
-  const orgId = user?.id ?? null
+  const { user } = useAuth()
+  const orgId = user?.id
 
   useEffect(() => {
     if (initialEvents.length > 0) return
-    if (!orgId) return
-    let cancelled = false
     async function load() {
-      // Filter to this organization only. The .or() handles legacy rows
-      // that pre-date the organization_id column.
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .or(`organization_id.eq.${orgId},and(organization_id.is.null,created_by.eq.${orgId})` as any)
-        .order("start_date", { ascending: true })
-
-      if (cancelled) return
-
+      const query = supabase.from("events").select("*").order("start_date", { ascending: true })
+      if (orgId) {
+        query.eq("organization_id", orgId)
+      }
+      const { data, error } = await query
       if (error) {
-        console.error("[events] load failed:", error)
-        setEvents([])
+        logError("Failed to load events", 'EventsContext', error)
+        setEvents(SEED_EVENTS)
         return
       }
-      // Production-empty start: no auto-seed. New clubs see an empty calendar
-      // and create their first event from the UI.
-      setEvents((data ?? []).map(toEvent))
+      if (data && data.length > 0) {
+        setEvents(data.map(toEvent))
+      } else {
+        const rows = SEED_EVENTS.map(e => ({ ...toRow(e), organization_id: orgId }))
+        const { data: seeded, error: seedErr } = await supabase.from("events").insert(rows).select()
+        if (seedErr) {
+          logError("Failed to seed events", 'EventsContext', seedErr)
+          setEvents(SEED_EVENTS)
+        } else if (seeded) {
+          setEvents(seeded.map(toEvent))
+        }
+      }
     }
-    void load()
-    return () => { cancelled = true }
+    load()
   }, [orgId, initialEvents.length])
 
   const addEvent = useCallback(async (event: CalendarEvent) => {
-    if (!orgId) return
-    const row = toRow({ ...event, createdBy: event.createdBy || orgId }, orgId)
+    const row = { ...toRow(event), organization_id: orgId }
     const { data, error } = await supabase.from("events").insert(row).select().single()
     if (error) {
-      console.error("Failed to add event:", error)
+      logError("Failed to add event", 'EventsContext', error)
       return
     }
     if (data) setEvents((prev) => [...prev, toEvent(data)])
   }, [orgId])
 
   const updateEvent = useCallback(async (event: CalendarEvent) => {
-    const row = toRow(event, orgId)
+    const row = { ...toRow(event), organization_id: orgId }
     const { error } = await supabase.from("events").update(row).eq("id", event.id)
     if (error) {
-      console.error("Failed to update event:", error)
+      logError("Failed to update event", 'EventsContext', error)
       return
     }
     setEvents((prev) => prev.map((e) => (e.id === event.id ? event : e)))
   }, [orgId])
 
   const deleteEvent = useCallback(async (id: string) => {
-    const { error } = await supabase.from("events").delete().eq("id", id)
+    const query = supabase.from("events").delete().eq("id", id)
+    if (orgId) {
+      query.eq("organization_id", orgId)
+    }
+    const { error } = await query
     if (error) {
-      console.error("Failed to delete event:", error)
+      logError("Failed to delete event", 'EventsContext', error)
       return
     }
     setEvents((prev) => prev.filter((e) => e.id !== id))
-  }, [])
+  }, [orgId])
 
   const getEventsForDate = useCallback(
     (date: Date) => {

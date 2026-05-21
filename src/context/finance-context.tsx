@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from "react"
+import { logError } from "@/lib/logger"
 import {
   type Expense,
   type Reimbursement,
@@ -8,7 +9,7 @@ import {
   type ReimbursementStatus,
 } from "@/components/finance/types"
 import { supabase } from "@/lib/supabase"
-import { useAuth } from "@/context/auth-context"
+import { useAuth } from "./auth-context"
 
 const today = new Date()
 const y = today.getFullYear()
@@ -58,7 +59,7 @@ function toExpense(row: Record<string, unknown>): Expense {
     notes: (row.notes as string) || undefined,
   }
 }
-function expenseToRow(e: Expense, orgId: string | null = null) {
+function expenseToRow(e: Expense) {
   return {
     description: e.description,
     amount: e.amount,
@@ -69,7 +70,6 @@ function expenseToRow(e: Expense, orgId: string | null = null) {
     approved_by: e.approvedBy || null,
     receipt_url: e.receiptUrl || null,
     notes: e.notes || null,
-    organization_id: orgId,
   }
 }
 
@@ -89,7 +89,7 @@ function toReimbursement(row: Record<string, unknown>): Reimbursement {
   }
 }
 
-function reimbursementToRow(r: Reimbursement, orgId: string | null = null) {
+function reimbursementToRow(r: Reimbursement) {
   return {
     submitted_by: r.submittedBy,
     amount: r.amount,
@@ -101,7 +101,6 @@ function reimbursementToRow(r: Reimbursement, orgId: string | null = null) {
     approved_by: r.approvedBy || null,
     paid_date: r.paidDate ? new Date(r.paidDate).toISOString().split("T")[0] : null,
     notes: r.notes || null,
-    organization_id: orgId,
   }
 }
 
@@ -117,7 +116,7 @@ function toIncome(row: Record<string, unknown>): Income {
   }
 }
 
-function incomeToRow(i: Income, orgId: string | null = null) {
+function incomeToRow(i: Income) {
   return {
     source: i.source,
     amount: i.amount,
@@ -125,7 +124,6 @@ function incomeToRow(i: Income, orgId: string | null = null) {
     date: i.date ? new Date(i.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
     notes: i.notes || null,
     recurring: i.recurring || false,
-    organization_id: orgId,
   }
 }
 
@@ -159,75 +157,76 @@ export function FinanceProvider({
   initialIncome?: Income[],
   initialReimbursements?: Reimbursement[]
 }) {
-  const { user } = useAuth()
   const [budget, setBudget] = useState<Budget>(SEED_BUDGET)
   const [expenses, setExpenses] = useState<Expense[]>(initialExpenses)
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>(initialReimbursements)
   const [income, setIncome] = useState<Income[]>(initialIncome)
-  const orgId = user?.id ?? null
+  const { user } = useAuth()
+  const orgId = user?.id
 
   useEffect(() => {
     if (initialExpenses.length > 0 || initialIncome.length > 0 || initialReimbursements.length > 0) return
-    if (!orgId) return
-    let cancelled = false
     async function load() {
-      // Load budget for this organization (or fall back to the legacy single row).
-      const { data: budgetData } = await supabase
-        .from("budgets")
-        .select("*")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .or(`organization_id.eq.${orgId},organization_id.is.null` as any)
-        .limit(1)
-        .maybeSingle()
-      if (budgetData && !cancelled) {
+      const budgetQuery = supabase.from("budgets").select("*").limit(1)
+      if (orgId) {
+        budgetQuery.eq("organization_id", orgId)
+      }
+      const { data: budgetData } = await budgetQuery.single()
+      if (budgetData) {
         setBudget({ totalBudget: Number(budgetData.total_budget), termLabel: budgetData.term_label as string })
       }
 
-      // Expenses — production-empty start.
-      const { data: expData, error: expErr } = await supabase
-        .from("expenses")
-        .select("*")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .or(`organization_id.eq.${orgId},organization_id.is.null` as any)
-        .order("date", { ascending: false })
-      if (cancelled) return
+      const expQuery = supabase.from("expenses").select("*").order("date", { ascending: false })
+      if (orgId) {
+        expQuery.eq("organization_id", orgId)
+      }
+      const { data: expData, error: expErr } = await expQuery
       if (expErr) {
-        console.error("[finance] expenses load failed:", expErr)
-        setExpenses([])
+        logError("Failed to load expenses", 'FinanceContext', expErr)
+        setExpenses(SEED_EXPENSES)
+      } else if (expData && expData.length > 0) {
+        setExpenses(expData.map(toExpense))
       } else {
-        setExpenses((expData ?? []).map(toExpense))
+        const rows = SEED_EXPENSES.map(e => ({ ...expenseToRow(e), organization_id: orgId }))
+        const { data: seeded } = await supabase.from("expenses").insert(rows).select()
+        setExpenses(seeded ? seeded.map(toExpense) : SEED_EXPENSES)
       }
 
-      const { data: reimData, error: reimErr } = await supabase
-        .from("reimbursements")
-        .select("*")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .or(`organization_id.eq.${orgId},organization_id.is.null` as any)
-        .order("date", { ascending: false })
-      if (cancelled) return
+      // Reimbursements
+      const reimQuery = supabase.from("reimbursements").select("*").order("date", { ascending: false })
+      if (orgId) {
+        reimQuery.eq("organization_id", orgId)
+      }
+      const { data: reimData, error: reimErr } = await reimQuery
       if (reimErr) {
-        console.error("[finance] reimbursements load failed:", reimErr)
-        setReimbursements([])
+        logError("Failed to load reimbursements", 'FinanceContext', reimErr)
+        setReimbursements(SEED_REIMBURSEMENTS)
+      } else if (reimData && reimData.length > 0) {
+        setReimbursements(reimData.map(toReimbursement))
       } else {
-        setReimbursements((reimData ?? []).map(toReimbursement))
+        const rows = SEED_REIMBURSEMENTS.map(r => ({ ...reimbursementToRow(r), organization_id: orgId }))
+        const { data: seeded } = await supabase.from("reimbursements").insert(rows).select()
+        setReimbursements(seeded ? seeded.map(toReimbursement) : SEED_REIMBURSEMENTS)
       }
 
-      const { data: incData, error: incErr } = await supabase
-        .from("income")
-        .select("*")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .or(`organization_id.eq.${orgId},organization_id.is.null` as any)
-        .order("date", { ascending: false })
-      if (cancelled) return
+      // Income
+      const incQuery = supabase.from("income").select("*").order("date", { ascending: false })
+      if (orgId) {
+        incQuery.eq("organization_id", orgId)
+      }
+      const { data: incData, error: incErr } = await incQuery
       if (incErr) {
-        console.error("[finance] income load failed:", incErr)
-        setIncome([])
+        logError("Failed to load income", 'FinanceContext', incErr)
+        setIncome(SEED_INCOME)
+      } else if (incData && incData.length > 0) {
+        setIncome(incData.map(toIncome))
       } else {
-        setIncome((incData ?? []).map(toIncome))
+        const rows = SEED_INCOME.map(i => ({ ...incomeToRow(i), organization_id: orgId }))
+        const { data: seeded } = await supabase.from("income").insert(rows).select()
+        setIncome(seeded ? seeded.map(toIncome) : SEED_INCOME)
       }
     }
-    void load()
-    return () => { cancelled = true }
+    load()
   }, [orgId, initialExpenses.length, initialIncome.length, initialReimbursements.length])
 
   const totalSpent = useMemo(
@@ -246,23 +245,24 @@ export function FinanceProvider({
   )
 
   const addExpense = useCallback(async (expense: Expense) => {
-    const row = expenseToRow({...expense, id: crypto.randomUUID()}, orgId)
+    const row = { ...expenseToRow({ ...expense, id: crypto.randomUUID() }), organization_id: orgId }
     const { data, error } = await supabase.from("expenses").insert(row).select().single()
     if (error) { 
-      console.error("Failed to add expense:", error)
+      logError("Failed to add expense", 'FinanceContext', error)
       throw error
     }
     if (data) setExpenses((prev) => [toExpense(data), ...prev])
   }, [orgId])
 
   const updateExpenseStatus = useCallback(async (id: string, status: ExpenseStatus, approvedBy?: string) => {
-  const update: { status: string; approved_by?: string } = { status }
+  const update: { status: string; approved_by?: string; organization_id?: string } = { status }
   if (approvedBy) update.approved_by = approvedBy
+  if (orgId) update.organization_id = orgId
   
   const { error } = await supabase.from("expenses").update(update as any).eq("id", id)
   
   if (error) { 
-    console.error("Failed to update expense:", error)
+    logError("Failed to update expense", 'FinanceContext', error)
     throw error // This is vital for the .rejects test to work
   }
 
@@ -274,17 +274,17 @@ export function FinanceProvider({
   const deleteExpense = useCallback(async (id: string) => {
     const { error } = await supabase.from("expenses").delete().eq("id", id)
     if (error) {
-       console.error("Failed to delete expense:", error)
+       logError("Failed to delete expense", 'FinanceContext', error)
        throw error
     }
     setExpenses((prev) => prev.filter((e) => e.id !== id))
   }, [])
 
   const addReimbursement = useCallback(async (reimbursement: Reimbursement) => {
-    const row = reimbursementToRow({...reimbursement, id: crypto.randomUUID()}, orgId)
+    const row = { ...reimbursementToRow({ ...reimbursement, id: crypto.randomUUID() }), organization_id: orgId }
     const { data, error } = await supabase.from("reimbursements").insert(row).select().single()
     if (error) { 
-      console.error("Failed to add reimbursement:", error)
+      logError("Failed to add reimbursement", 'FinanceContext', error)
       throw error
     }
     if (data) setReimbursements((prev) => [toReimbursement(data), ...prev])
@@ -292,12 +292,13 @@ export function FinanceProvider({
 
   const updateReimbursementStatus = useCallback(
     async (id: string, status: ReimbursementStatus, approvedBy?: string) => {
-      const update: { status: string; approved_by?: string; paid_date?: string } = { status }
+      const update: { status: string; approved_by?: string; paid_date?: string; organization_id?: string } = { status }
       if (approvedBy) update.approved_by = approvedBy
       if (status === "paid") update.paid_date = new Date().toISOString().split("T")[0]
+      if (orgId) update.organization_id = orgId
       const { error } = await supabase.from("reimbursements").update(update as any).eq("id", id)
       if (error) { 
-        console.error("Failed to update reimbursement:", error)
+        logError("Failed to update reimbursement", 'FinanceContext', error)
         throw error
       }
       setReimbursements((prev) =>
@@ -313,21 +314,25 @@ export function FinanceProvider({
         )
       )
     },
-    []
+    [orgId]
   )
 
   const addIncome = useCallback(async (inc: Income) => {
-    const row = incomeToRow(inc, orgId)
+    const row = { ...incomeToRow(inc), organization_id: orgId }
     const { data, error } = await supabase.from("income").insert(row).select().single()
-    if (error) { console.error("Failed to add income:", error); return }
+    if (error) { logError("Failed to add income", 'FinanceContext', error); throw error }
     if (data) setIncome((prev) => [toIncome(data), ...prev])
   }, [orgId])
 
   const deleteIncome = useCallback(async (id: string) => {
-    const { error } = await supabase.from("income").delete().eq("id", id)
-    if (error) { console.error("Failed to delete income:", error); return }
+    const query = supabase.from("income").delete().eq("id", id)
+    if (orgId) {
+      query.eq("organization_id", orgId)
+    }
+    const { error } = await query
+    if (error) { logError("Failed to delete income", 'FinanceContext', error); return }
     setIncome((prev) => prev.filter((i) => i.id !== id))
-  }, [])
+  }, [orgId])
 
   return (
     <FinanceContext.Provider

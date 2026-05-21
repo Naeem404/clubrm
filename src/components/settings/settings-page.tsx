@@ -1,7 +1,8 @@
+import { logError } from "@/lib/logger"
 import { useState, useEffect, useCallback } from "react"
 import { cn } from "@/lib/utils"
-// Use supabaseUntyped to bypass strict type checking for org_settings
-import { supabaseUntyped as db } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase"
+import type { Json } from "@/lib/database.types"
 import { useTheme, type AccentColor } from "@/context/theme-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -98,12 +99,12 @@ export function SettingsPage() {
   // Load settings from Supabase
   useEffect(() => {
     async function load() {
-      const { data, error } = await db.from("org_settings").select("*").limit(1).single()
+      const { data, error } = await supabase.from("org_settings").select("*").limit(1).single()
 
       if (error) {
         // If the table is empty (PGRST116), we just stop here and use the defaults
         if (error.code !== "PGRST116") {
-          console.error("Failed to load settings:", error)
+          logError("Failed to load settings", 'SettingsPage', error)
         }
         return
       }
@@ -121,7 +122,7 @@ export function SettingsPage() {
           timezone: data.timezone || "America/Toronto",
         })
         if (data.notification_prefs && typeof data.notification_prefs === "object") {
-          setNotifications((prev) => ({ ...prev, ...data.notification_prefs }))
+          setNotifications((prev) => ({ ...prev, ...(data.notification_prefs as Record<string, unknown>) }))
         }
         if (data.theme) setTheme(data.theme as "dark" | "light" | "system")
       }
@@ -139,16 +140,16 @@ export function SettingsPage() {
       university: org.university,
       term: org.term,
       timezone: org.timezone,
-      notification_prefs: notifications,
+      notification_prefs: notifications as unknown as Json,
       theme,
     }
 
     if (settingsId) {
-      const { error } = await db.from("org_settings").update(payload).eq("id", settingsId)
-      if (error) console.error("Failed to save settings:", error)
+      const { error } = await supabase.from("org_settings").update(payload).eq("id", settingsId)
+      if (error) logError("Failed to save settings", 'SettingsPage', error)
     } else {
-      const { data, error } = await db.from("org_settings").insert(payload).select().single()
-      if (error) console.error("Failed to create settings:", error)
+      const { data, error } = await supabase.from("org_settings").insert(payload).select().single()
+      if (error) logError("Failed to create settings", 'SettingsPage', error)
       if (data) setSettingsId(data.id)
     }
     setSaved(true)

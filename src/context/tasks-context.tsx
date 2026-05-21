@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react"
+import { logError } from "@/lib/logger"
 import { type Task, type TaskStatus } from "@/components/tasks/types"
 import { supabase } from "@/lib/supabase"
-import { useAuth } from "@/context/auth-context"
+import { useAuth } from "./auth-context"
 
 const today = new Date()
 const y = today.getFullYear()
@@ -332,7 +333,7 @@ function toTask(row: Record<string, unknown>): Task {
   }
 }
 
-function toRow(t: Task, orgId: string | null = null) {
+function toRow(t: Task) {
   return {
     title: t.title,
     description: t.description || "",
@@ -346,7 +347,6 @@ function toRow(t: Task, orgId: string | null = null) {
     dependencies: t.dependencies || [],
     subtasks: t.subtasks ? [...t.subtasks.map(st => ({ ...st }))] : [],
     section: t.section || null,
-    organization_id: orgId,
   }
 }
 
@@ -362,85 +362,84 @@ interface TasksContextType {
 const TasksContext = createContext<TasksContextType | undefined>(undefined)
 
 export function TasksProvider({ children, initialTasks = [] }: { children: React.ReactNode, initialTasks?: Task[] }) {
-  const { user } = useAuth()
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
-  const orgId = user?.id ?? null
+  const { user } = useAuth()
+  const orgId = user?.id
 
   useEffect(() => {
     if (initialTasks.length > 0) return
-    if (!orgId) return
-    let cancelled = false
     async function load() {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .or(`organization_id.eq.${orgId},organization_id.is.null` as any)
-        .order("created_at", { ascending: true })
-
-      if (cancelled) return
-
+      const query = supabase.from("tasks").select("*").order("created_at", { ascending: true })
+      if (orgId) {
+        query.eq("organization_id", orgId)
+      }
+      const { data, error } = await query
       if (error) {
-        console.error("[tasks] load failed:", error)
-        setTasks([])
+        logError("Failed to load tasks", 'TasksContext', error)
+        setTasks(SEED_TASKS)
         return
       }
-      // Production-empty start: no auto-seed.
-      setTasks((data ?? []).map(toTask))
+      if (data && data.length > 0) {
+        setTasks(data.map(toTask))
+      } else {
+        const rows = SEED_TASKS.map(t => ({ ...toRow(t), organization_id: orgId }))
+        const { data: seeded, error: seedErr } = await supabase.from("tasks").insert(rows).select()
+        if (seedErr) {
+          logError("Failed to seed tasks", 'TasksContext', seedErr)
+          setTasks(SEED_TASKS)
+        } else if (seeded) {
+          setTasks(seeded.map(toTask))
+        }
+      }
     }
-    void load()
-    return () => { cancelled = true }
+    load()
   }, [orgId, initialTasks.length])
 
   const addTask = useCallback(async (task: Task) => {
-    if (!orgId) return
-    const row = toRow(task, orgId)
+    const row = { ...toRow(task), organization_id: orgId }
     const { data, error } = await supabase.from("tasks").insert(row).select().single()
     if (error) {
-      console.error("Failed to add task:", error)
+      logError("Failed to add task", 'TasksContext', error)
       return
     }
     if (data) setTasks((prev) => [...prev, toTask(data)])
   }, [orgId])
 
   const updateTask = useCallback(async (task: Task) => {
-    const row = toRow(task, orgId)
+    const row = { ...toRow(task), organization_id: orgId }
     const { error } = await supabase.from("tasks").update(row).eq("id", task.id)
     if (error) {
-      console.error("Failed to update task:", error)
+      logError("Failed to update task", 'TasksContext', error)
       return
     }
     setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)))
   }, [orgId])
 
   const deleteTask = useCallback(async (id: string) => {
-    const { error } = await supabase.from("tasks").delete().eq("id", id)
+    const query = supabase.from("tasks").delete().eq("id", id)
+    if (orgId) {
+      query.eq("organization_id", orgId)
+    }
+    const { error } = await query
     if (error) {
-      console.error("Failed to delete task:", error)
+      logError("Failed to delete task", 'TasksContext', error)
       return
     }
     setTasks((prev) => prev.filter((t) => t.id !== id))
-  }, [])
+  }, [orgId])
 
   const moveTask = useCallback(async (taskId: string, newStatus: TaskStatus) => {
-    const completedAt = newStatus === "done" ? new Date().toISOString() : null
-    const { error } = await supabase.from("tasks").update({ status: newStatus, completed_at: completedAt }).eq("id", taskId)
+    const query = supabase.from("tasks").update({ status: newStatus }).eq("id", taskId)
+    if (orgId) {
+      query.eq("organization_id", orgId)
+    }
+    const { error } = await query
     if (error) {
-      console.error("Failed to move task:", error)
+      logError("Failed to move task", 'TasksContext', error)
       return
     }
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === taskId
-          ? {
-              ...t,
-              status: newStatus,
-              completedAt: newStatus === "done" ? new Date() : t.completedAt,
-            }
-          : t
-      )
-    )
-  }, [])
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)))
+  }, [orgId])
 
   const reorderTasks = useCallback(
     (activeId: string, overId: string, newStatus: TaskStatus) => {
@@ -463,11 +462,15 @@ export function TasksProvider({ children, initialTasks = [] }: { children: React
         }
 
         // Persist the status change
-        supabase.from("tasks").update({
+        const query = supabase.from("tasks").update({
           status: newStatus,
           completed_at: newStatus === "done" ? new Date().toISOString() : null,
-        }).eq("id", activeId).then(({ error }) => {
-          if (error) console.error("Failed to persist reorder:", error)
+        }).eq("id", activeId)
+        if (orgId) {
+          query.eq("organization_id", orgId)
+        }
+        query.then(({ error }) => {
+          if (error) logError("Failed to persist reorder", 'TasksContext', error)
         })
 
         return updated

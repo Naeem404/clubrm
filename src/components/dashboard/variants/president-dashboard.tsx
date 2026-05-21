@@ -1,4 +1,5 @@
-import { useMemo, useEffect, useState } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { logError } from "@/lib/logger";
 import { useAuth } from "@/context/auth-context";
 import { StatCard } from "../stat-card";
 import { Widget } from "../widget";
@@ -74,7 +75,7 @@ function PresidentDashboardContent() {
         const data = await res.json();
         setApiData(data);
       } catch (err) {
-        console.error("Failed to fetch stats:", err);
+        logError("Failed to fetch stats", 'PresidentDashboard', err);
       }
     }
     fetchStats();
@@ -99,7 +100,7 @@ function PresidentDashboardContent() {
         await updateReimbursementStatus(id, "approved", "President");
       }
     } catch (err: any) {
-      console.error("Approval failed:", err);
+      logError("Approval failed", 'PresidentDashboard', err);
       setStateError(err.message || "Failed to approve item. Check permissions.");
     } finally {
       setActioningId(null);

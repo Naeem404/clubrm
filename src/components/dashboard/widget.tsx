@@ -1,3 +1,4 @@
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -9,7 +10,7 @@ interface WidgetProps {
   footer?: React.ReactNode;
 }
 
-export function Widget({
+export const Widget = React.memo(function Widget({
   title,
   children,
   className,
@@ -37,4 +38,4 @@ export function Widget({
       )}
     </Card>
   );
-}
+});

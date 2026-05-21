@@ -5,15 +5,7 @@ import { useTasks } from "@/context/tasks-context"
 import { useFinance } from "@/context/finance-context"
 import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from "date-fns"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   BarChart,
   Bar,
@@ -27,8 +19,6 @@ import {
   Cell,
   AreaChart,
   Area,
-  RadialBarChart,
-  RadialBar,
   ComposedChart,
   Line,
   Legend,
@@ -38,117 +28,39 @@ import {
   Calendar,
   CheckSquare,
   DollarSign,
-  TrendingUp,
-  TrendingDown,
   ArrowUpRight,
   ArrowDownRight,
-  FileBarChart,
   Activity,
-  Target,
-  Zap,
-  Download,
   AlertTriangle,
-  Clock,
   Award,
-  Shield,
   BarChart3,
   PieChart as PieChartIcon,
   UserCheck,
   UserX,
-  CalendarCheck,
-  Wallet,
-  Receipt,
-  CircleDollarSign,
   Gauge,
   Flame,
   Star,
+  Target,
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  CalendarCheck,
+  Clock,
+  Shield,
+  CircleDollarSign,
+  Receipt,
+  FileBarChart,
+  Zap,
 } from "lucide-react"
-
-// ─── Chart Palette ───────────────────────────────────────────────────────────
-const PIE_COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#a78bfa", "#fb923c", "#f87171", "#06b6d4", "#e879f9"]
-
-const STATUS_COLORS: Record<string, string> = {
-  backlog: "#64748b", todo: "#3b82f6", in_progress: "#f59e0b", in_review: "#8b5cf6", done: "#10b981",
-}
-const PRIORITY_COLORS: Record<string, string> = {
-  urgent: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e",
-}
-
-// ─── Shared axis / grid props ─────────────────────────────────────────────────
-const AXIS_TICK  = { fontSize: 11, fill: "#94a3b8" }
-const AXIS_TICK_SM = { fontSize: 10, fill: "#94a3b8" }
-const GRID_PROPS = {
-  strokeDasharray: "3 3",
-  vertical: false,
-  stroke: "hsl(var(--border))",
-  opacity: 0.4,
-} as const
-const XAXIS_PROPS = { tick: AXIS_TICK, tickLine: false, axisLine: false } as const
-const YAXIS_PROPS = {
-  tick: AXIS_TICK,
-  tickLine: false,
-  axisLine: false,
-  tickFormatter: (v: number) => v > 999 ? `${(v / 1000).toFixed(1)}k` : String(v),
-} as const
-const CURSOR_PROPS = { fill: "hsl(var(--muted))", opacity: 0.2 }
-
-// ─── Shared custom tooltip — matches Marketing page exactly ──────────────────
-function ChartTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="bg-card border border-border/80 p-3 rounded-xl shadow-2xl backdrop-blur-md">
-      {label && <p className="text-xs font-bold mb-2 text-foreground">{label}</p>}
-      <div className="space-y-1">
-        {payload.map((entry: any, i: number) => (
-          <div key={i} className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
-              <span className="text-[10px] font-medium text-muted-foreground">{entry.name}:</span>
-            </div>
-            <span className="text-[10px] font-bold text-foreground">
-              {typeof entry.value === "number" && entry.name?.includes("$")
-                ? fmt(entry.value)
-                : entry.value?.toLocaleString?.() ?? entry.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function CurrencyTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="bg-card border border-border/80 p-3 rounded-xl shadow-2xl backdrop-blur-md">
-      {label && <p className="text-xs font-bold mb-2 text-foreground">{label}</p>}
-      <div className="space-y-1">
-        {payload.map((entry: any, i: number) => (
-          <div key={i} className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color ?? entry.fill }} />
-              <span className="text-[10px] font-medium text-muted-foreground">{entry.name}:</span>
-            </div>
-            <span className="text-[10px] font-bold text-foreground">{fmt(entry.value)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function fmt(n: number) {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", minimumFractionDigits: 0 }).format(n)
-}
-function pct(a: number, b: number) {
-  return b > 0 ? ((a / b) * 100).toFixed(1) : "0"
-}
-function safeDate(v: Date | string | null | undefined): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(v)
-  return isNaN(d.getTime()) ? null : d
-}
+import { PIE_COLORS, STATUS_COLORS, PRIORITY_COLORS, AXIS_TICK, AXIS_TICK_SM, GRID_PROPS, XAXIS_PROPS, YAXIS_PROPS, CURSOR_PROPS } from "./chart-constants"
+import { ChartTooltip, CurrencyTooltip } from "./chart-tooltips"
+import { fmt, pct, safeDate } from "./chart-utils"
+import { ReportsHeader } from "./reports-header"
+import { OrgHealthCard } from "./org-health-card"
+import { KPICards } from "./kpi-cards"
+import { SmartInsights } from "./smart-insights"
+import { ModuleBreakdown } from "./module-breakdown"
+import { EngagementLeaderboard } from "./engagement-leaderboard"
 
 const pieLabel = (props: any) => {
   const { name, percent, x, y, textAnchor } = props
@@ -310,15 +222,14 @@ export function ReportsPage() {
       const start = startOfMonth(date)
       const end   = endOfMonth(date)
       const label = format(date, "MMM")
-      const monthIncome   = income.filter(inc => { const d = safeDate(inc.date);    return d && isWithinInterval(d, { start, end }) }).reduce((s, inc) => s + inc.amount, 0)
-      const monthSpending = expenses.filter(exp => { const d = safeDate(exp.date);  return d && isWithinInterval(d, { start, end }) }).reduce((s, exp) => s + exp.amount, 0)
-      const monthEvents   = events.filter(ev => { const d = safeDate(ev.startDate); return d && isWithinInterval(d, { start, end }) }).length
-      const monthTasks    = tasks.filter(t => { const d = safeDate(t.createdAt);    return d && isWithinInterval(d, { start, end }) }).length
-      const monthMembers  = members.filter(m => { const d = safeDate(m.joinDate);   return d && d <= end && m.status === "active" }).length
+      const monthIncome   = fIncome.filter(inc => { const d = safeDate(inc.date);    return d && isWithinInterval(d, { start, end }) }).reduce((s, inc) => s + inc.amount, 0)
+      const monthSpending = fExpenses.filter(exp => { const d = safeDate(exp.date);  return d && isWithinInterval(d, { start, end }) }).reduce((s, exp) => s + exp.amount, 0)
+      const monthEvents   = fEvents.filter(ev => { const d = safeDate(ev.startDate); return d && isWithinInterval(d, { start, end }) }).length
+      const monthTasks    = fTasks.filter(t => { const d = safeDate(t.createdAt);    return d && isWithinInterval(d, { start, end }) }).length
+      const monthMembers  = fMembers.filter(m => { const d = safeDate(m.joinDate);   return d && d <= end && m.status === "active" }).length
       months.push({ month: label, members: monthMembers, events: monthEvents, tasks: monthTasks, income: Math.round(monthIncome), spending: Math.round(monthSpending) })
     }
     return months
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fExpenses, fIncome, fEvents, fTasks, fMembers])
 
   // Members derived
@@ -435,81 +346,40 @@ export function ReportsPage() {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Reports & Analytics</h1>
-          <p className="text-sm text-muted-foreground mt-1">Cross-module intelligence across members, operations, finance, and events</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={selectedDept} onValueChange={setSelectedDept}>
-            <SelectTrigger className="w-[150px] h-9 text-xs">
-              <div className="flex items-center gap-1.5">
-                <Shield className="h-3 w-3 text-muted-foreground" />
-                <SelectValue placeholder="Department" />
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map(d => (<SelectItem key={d} value={d}>{d}</SelectItem>))}
-            </SelectContent>
-          </Select>
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-[150px] h-9 text-xs"><SelectValue placeholder="Period" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="this-term">This Term</SelectItem>
-              <SelectItem value="last-term">Last Term</SelectItem>
-              <SelectItem value="ytd">Year to Date</SelectItem>
-              <SelectItem value="all-time">All Time</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="sm" className="gap-1.5 h-9 text-xs" onClick={() => handleExport("csv")}><Download className="h-3.5 w-3.5" /> CSV</Button>
-          <Button variant="outline" size="sm" className="gap-1.5 h-9 text-xs" onClick={() => handleExport("pdf")}><Download className="h-3.5 w-3.5" /> PDF</Button>
-        </div>
-      </div>
+      <ReportsHeader
+        selectedDept={selectedDept}
+        onDeptChange={setSelectedDept}
+        period={period}
+        onPeriodChange={setPeriod}
+        departments={departments}
+        onExport={handleExport}
+      />
 
       {/* Org Health + KPI Strip */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-3 bg-card border border-border/50 rounded-2xl p-5 flex flex-col items-center justify-center">
-          <p className="text-[10px] font-medium uppercase text-muted-foreground tracking-wider mb-1">Org Health Score</p>
-          <div className="relative">
-            <ResponsiveContainer width={140} height={140}>
-              <RadialBarChart cx="50%" cy="50%" innerRadius="70%" outerRadius="100%" startAngle={180} endAngle={0} data={healthRadial}>
-                <RadialBar dataKey="value" cornerRadius={10} background={{ fill: "hsl(var(--muted))" }} />
-              </RadialBarChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pt-2">
-              <span className={cn("text-3xl font-bold", healthColor)}>{orgHealth}</span>
-              <span className="text-[10px] text-muted-foreground">/100</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 mt-1">
-            <div className={cn("h-2 w-2 rounded-full", healthBg)} />
-            <span className={cn("text-xs font-medium", healthColor)}>{healthLabel}</span>
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-2 text-center">Based on retention, tasks, budget & events</p>
+        <div className="lg:col-span-3">
+          <OrgHealthCard
+            orgHealth={orgHealth}
+            healthColor={healthColor}
+            healthBg={healthBg}
+            healthLabel={healthLabel}
+            healthRadial={healthRadial}
+          />
         </div>
 
-        <div className="lg:col-span-9 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {[
-            { label: "Active Members",    value: fMemberStats.active,             sub: `of ${fMemberStats.total} total`,         icon: <UserCheck className="h-4 w-4" />,                                         color: "text-emerald-400", trend: `${retentionRate}% retention`      },
-            { label: "Task Completion",   value: `${completionRate.toFixed(0)}%`, sub: `${completedTasks}/${fTasks.length} done`, icon: <Target className="h-4 w-4" />,                                           color: "text-violet-400",  trend: `${overdueTasks.length} overdue`   },
-            { label: "Budget Used",       value: `${budgetUtil.toFixed(0)}%`,     sub: `${fmt(budgetRemaining)} left`,            icon: <Wallet className="h-4 w-4" />,                                           color: "text-cyan-400",    trend: fmt(budget.totalBudget) + " total" },
-            { label: "Net Cash Flow",     value: fmt(netCashFlow),                sub: `${fmt(fTotalIncome)} in / ${fmt(fTotalSpent)} out`, icon: netCashFlow >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />, color: netCashFlow >= 0 ? "text-emerald-400" : "text-red-400", trend: netCashFlow >= 0 ? "Positive" : "Negative" },
-            { label: "Events",            value: fEvents.length,                  sub: `${upcomingEvents} upcoming`,              icon: <Calendar className="h-4 w-4" />,                                         color: "text-pink-400",    trend: `${pastEvents} completed`          },
-            { label: "Avg Fill Rate",     value: `${avgFillRate.toFixed(0)}%`,    sub: `${totalRegistered} registrations`,        icon: <CalendarCheck className="h-4 w-4" />,                                    color: "text-amber-400",   trend: `${eventsWithCapacity.length} events` },
-            { label: "Pending Approvals", value: pendingExpenses + pendingReimb,  sub: `${fmt(fTotalPending)} expenses`,          icon: <Clock className="h-4 w-4" />,                                            color: "text-orange-400",  trend: `${pendingReimb} reimbursements`   },
-            { label: "Engagement Avg",    value: `${avgEngagement}`,             sub: `${atRiskMembers.length} at risk`,         icon: <Activity className="h-4 w-4" />,                                         color: "text-blue-400",    trend: `${engagementScores.length} active` },
-          ].map(kpi => (
-            <div key={kpi.label} className="bg-card border border-border/50 rounded-2xl p-3 space-y-1 hover:border-primary/30 transition-colors">
-              <div className={cn("flex items-center gap-1.5", kpi.color)}>
-                {kpi.icon}
-                <span className="text-[10px] font-medium uppercase tracking-wide">{kpi.label}</span>
-              </div>
-              <p className="text-lg font-bold leading-none">{kpi.value}</p>
-              <p className="text-[10px] text-muted-foreground">{kpi.sub}</p>
-              <p className="text-[9px] text-muted-foreground/70 italic">{kpi.trend}</p>
-            </div>
-          ))}
+        <div className="lg:col-span-9">
+          <KPICards
+            kpis={[
+              { label: "Active Members",    value: fMemberStats.active,             sub: `of ${fMemberStats.total} total`,         icon: <UserCheck className="h-4 w-4" />,                                         color: "text-emerald-400", trend: `${retentionRate}% retention`      },
+              { label: "Task Completion",   value: `${completionRate.toFixed(0)}%`, sub: `${completedTasks}/${fTasks.length} done`, icon: <Target className="h-4 w-4" />,                                           color: "text-violet-400",  trend: `${overdueTasks.length} overdue`   },
+              { label: "Budget Used",       value: `${budgetUtil.toFixed(0)}%`,     sub: `${fmt(budgetRemaining)} left`,            icon: <Wallet className="h-4 w-4" />,                                           color: "text-cyan-400",    trend: fmt(budget.totalBudget) + " total" },
+              { label: "Net Cash Flow",     value: fmt(netCashFlow),                sub: `${fmt(fTotalIncome)} in / ${fmt(fTotalSpent)} out`, icon: netCashFlow >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />, color: netCashFlow >= 0 ? "text-emerald-400" : "text-red-400", trend: netCashFlow >= 0 ? "Positive" : "Negative" },
+              { label: "Events",            value: fEvents.length,                  sub: `${upcomingEvents} upcoming`,              icon: <Calendar className="h-4 w-4" />,                                         color: "text-pink-400",    trend: `${pastEvents} completed`          },
+              { label: "Avg Fill Rate",     value: `${avgFillRate.toFixed(0)}%`,    sub: `${totalRegistered} registrations`,        icon: <CalendarCheck className="h-4 w-4" />,                                    color: "text-amber-400",   trend: `${eventsWithCapacity.length} events` },
+              { label: "Pending Approvals", value: pendingExpenses + pendingReimb,  sub: `${fmt(fTotalPending)} expenses`,          icon: <Clock className="h-4 w-4" />,                                            color: "text-orange-400",  trend: `${pendingReimb} reimbursements`   },
+              { label: "Engagement Avg",    value: `${avgEngagement}`,             sub: `${atRiskMembers.length} at risk`,         icon: <Activity className="h-4 w-4" />,                                         color: "text-blue-400",    trend: `${engagementScores.length} active` },
+            ]}
+          />
         </div>
       </div>
 
@@ -550,49 +420,18 @@ export function ReportsPage() {
             </div>
 
             {/* Smart Insights */}
-            <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-sm">
-              <h3 className="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-tight">
-                <Zap className="h-4 w-4 text-primary" /> Smart Insights ({insights.length})
-              </h3>
-              <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
-                {insights.map((insight, i) => (
-                  <div key={i} className={cn("border rounded-xl p-3", insightColors[insight.type])}>
-                    <div className="flex items-center gap-2">
-                      {insightIcons[insight.type]}
-                      <p className="text-sm font-medium">{insight.title}</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 ml-6">{insight.detail}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <SmartInsights insights={insights} />
 
             {/* Module Breakdown */}
-            <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-sm">
-              <h3 className="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-tight">
-                <BarChart3 className="h-4 w-4 text-primary" /> Module Breakdown
-              </h3>
-              <div className="space-y-4">
-                {[
-                  { label: "Members",    val: fMemberStats.active,    max: fMemberStats.total,  color: "#3b82f6", detail: `${fMemberStats.inactive} inactive, ${fMemberStats.alumni} alumni` },
-                  { label: "Tasks Done", val: completedTasks,          max: fTasks.length,       color: "#10b981", detail: `${inProgressTasks} in progress, ${overdueTasks.length} overdue` },
-                  { label: "Budget",     val: Math.round(fTotalSpent), max: budget.totalBudget,  color: budgetUtil > 85 ? "#ef4444" : "#f59e0b", detail: `${fmt(budgetRemaining)} remaining` },
-                  { label: "Events",     val: pastEvents,              max: fEvents.length,      color: "#f472b6", detail: `${upcomingEvents} upcoming, ${avgFillRate.toFixed(0)}% avg fill` },
-                  { label: "Subtasks",   val: doneSubtasks,            max: totalSubtasks,       color: "#8b5cf6", detail: `${subtaskRate.toFixed(0)}% done, ${avgSubtasksPerTask} avg per task` },
-                ].map(item => (
-                  <div key={item.label} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{item.label}</span>
-                      <span className="text-muted-foreground text-xs">{item.val} / {item.max} ({item.max > 0 ? ((item.val / item.max) * 100).toFixed(0) : 0}%)</span>
-                    </div>
-                    <div className="h-2.5 bg-muted/50 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${item.max > 0 ? (item.val / item.max) * 100 : 0}%`, backgroundColor: item.color }} />
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">{item.detail}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ModuleBreakdown
+              items={[
+                { label: "Members",    val: fMemberStats.active,    max: fMemberStats.total,  color: "#3b82f6", detail: `${fMemberStats.inactive} inactive, ${fMemberStats.alumni} alumni` },
+                { label: "Tasks Done", val: completedTasks,          max: fTasks.length,       color: "#10b981", detail: `${inProgressTasks} in progress, ${overdueTasks.length} overdue` },
+                { label: "Budget",     val: Math.round(fTotalSpent), max: budget.totalBudget,  color: budgetUtil > 85 ? "#ef4444" : "#f59e0b", detail: `${fmt(budgetRemaining)} remaining` },
+                { label: "Events",     val: pastEvents,              max: fEvents.length,      color: "#f472b6", detail: `${upcomingEvents} upcoming, ${avgFillRate.toFixed(0)}% avg fill` },
+                { label: "Subtasks",   val: doneSubtasks,            max: totalSubtasks,       color: "#8b5cf6", detail: `${subtaskRate.toFixed(0)}% done, ${avgSubtasksPerTask} avg per task` },
+              ]}
+            />
           </div>
         </TabsContent>
 
@@ -601,29 +440,7 @@ export function ReportsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             {/* Engagement Leaderboard */}
-            <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-sm lg:col-span-2">
-              <h3 className="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-tight"><Award className="h-4 w-4 text-primary" /> Engagement Leaderboard</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {engagementScores.slice(0, 9).map((m, idx) => (
-                  <div key={m.id} className={cn("flex items-center gap-3 rounded-xl p-3 border transition-colors", idx < 3 ? "bg-primary/5 border-primary/20" : "bg-muted/20 border-border/30")}>
-                    <div className={cn("h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0", idx === 0 ? "bg-amber-500/20 text-amber-400" : idx === 1 ? "bg-slate-300/20 text-slate-300" : idx === 2 ? "bg-orange-700/20 text-orange-400" : "bg-muted/50 text-muted-foreground")}>
-                      {idx < 3 ? <Star className="h-4 w-4" /> : `#${idx + 1}`}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{m.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{m.role} · {m.department}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className={cn("text-sm font-bold", m.score >= 70 ? "text-emerald-400" : m.score >= 40 ? "text-amber-400" : "text-red-400")}>{m.score}</p>
-                      <p className="text-[9px] text-muted-foreground">score</p>
-                    </div>
-                    <div className="w-12 h-2 bg-muted/50 rounded-full overflow-hidden shrink-0">
-                      <div className="h-full rounded-full" style={{ width: `${m.score}%`, backgroundColor: m.score >= 70 ? "#10b981" : m.score >= 40 ? "#f59e0b" : "#ef4444" }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <EngagementLeaderboard engagementScores={engagementScores} />
 
             {/* By Role */}
             <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-sm">

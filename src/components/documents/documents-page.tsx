@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
+import { logError } from "@/lib/logger"
+import { useToast } from "@/context/toast-context"
 import { useSearchParams } from "react-router-dom"
-import { supabaseUntyped as db } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/context/auth-context"
 import { cn } from "@/lib/utils" 
 import { Button } from "@/components/ui/button"
@@ -43,6 +45,7 @@ interface Document {
 
 export function DocumentsPage() {
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const categoryFilter = searchParams.get("category") || "all"
   const [searchQuery, setSearchQuery] = useState("")
@@ -60,7 +63,7 @@ export function DocumentsPage() {
   const fetchDocuments = useCallback(async () => {
     setIsLoading(true)
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("documents")
         .select("*")
         .order("uploaded_at", { ascending: false })
@@ -68,7 +71,7 @@ export function DocumentsPage() {
       if (error) throw error
       setDocuments(data || [])
     } catch (err) {
-      console.error("Error fetching documents:", err)
+      logError("Error fetching documents", 'DocumentsPage', err)
     } finally {
       setIsLoading(false)
     }
@@ -87,13 +90,47 @@ export function DocumentsPage() {
     setIsUploading(true)
     setUploadError(null)
 
+    // File validation
+    const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+    const ALLOWED_FILE_TYPES = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'text/plain'
+    ]
+
+    // Validate file size
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      const errorMsg = `File size exceeds maximum limit of 10MB. Your file is ${(selectedFile.size / 1024 / 1024).toFixed(2)}MB.`
+      setUploadError(errorMsg)
+      showToast({ type: "error", title: "File Too Large", message: errorMsg })
+      setIsUploading(false)
+      return
+    }
+
+    // Validate file type
+    if (!ALLOWED_FILE_TYPES.includes(selectedFile.type)) {
+      const errorMsg = `File type "${selectedFile.type}" is not allowed. Allowed types: PDF, Word, Excel, PowerPoint, Images (JPEG, PNG, GIF), and Text files.`
+      setUploadError(errorMsg)
+      showToast({ type: "error", title: "Invalid File Type", message: errorMsg })
+      setIsUploading(false)
+      return
+    }
+
     try {
       const fileExt = selectedFile.name.split(".").pop()
       const fileName = `${crypto.randomUUID()}.${fileExt}`
       const filePath = `${user.id}/${fileName}`
 
       // Uploading to "documents" bucket
-      const { error: storageError } = await db.storage
+      const { error: storageError } = await supabase.storage
         .from("documents") 
         .upload(filePath, selectedFile, {
           cacheControl: '3600',
@@ -108,12 +145,12 @@ export function DocumentsPage() {
         category: formCategory,
         file_type: selectedFile.type, 
         size: `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`,
-        uploaded_by: user.email, // Fixed from uploadedBy
-        storage_path: filePath,  // Fixed from storagePath
-        uploaded_at: new Date().toISOString() // Fixed from uploadedAt
+        uploaded_by: user.email || user.id,
+        storage_path: filePath,
+        uploaded_at: new Date().toISOString()
       }
 
-      const { error: dbError } = await db
+      const { error: dbError } = await supabase
         .from("documents")
         .insert(newDoc)
 
@@ -123,9 +160,11 @@ export function DocumentsPage() {
       setSelectedFile(null)
       setFormName("")
       fetchDocuments()
+      showToast({ type: "success", title: "Document Uploaded", message: "Your document has been successfully uploaded." })
     } catch (err: any) {
       setUploadError(err.message)
-      console.error("Upload failed:", err)
+      logError("Upload failed", 'DocumentsPage', err)
+      showToast({ type: "error", title: "Upload Failed", message: err.message })
     } finally {
       setIsUploading(false)
     }
@@ -134,25 +173,30 @@ export function DocumentsPage() {
   const handleDelete = async (id: string, path: string) => {
     if (!confirm("Are you sure you want to remove this document?")) return
     try {
-      await db.storage.from("documents").remove([path])
-      await db.from("documents").delete().eq("id", id)
+      await supabase.storage.from("documents").remove([path])
+      await supabase.from("documents").delete().eq("id", id)
       setDocuments(prev => prev.filter(d => d.id !== id))
+      showToast({ type: "success", title: "Document Deleted", message: "The document has been successfully removed." })
     } catch (err) {
-      console.error("Delete failed:", err)
+      logError("Delete failed", 'DocumentsPage', err)
+      showToast({ type: "error", title: "Delete Failed", message: "Failed to remove the document. Please try again." })
     }
   }
 
   const handleDownload = async (path: string, filename: string) => {
     try {
-      const { data, error } = await db.storage.from("documents").download(path)
+      const { data, error } = await supabase.storage.from("documents").download(path)
       if (error) throw error
       const url = URL.createObjectURL(data)
       const a = document.createElement("a")
       a.href = url
       a.download = filename
       a.click()
+      URL.revokeObjectURL(url)
+      showToast({ type: "success", title: "Download Started", message: `Downloading ${filename}` })
     } catch (err) {
-      console.error("Download failed:", err)
+      logError("Download failed", 'DocumentsPage', err)
+      showToast({ type: "error", title: "Download Failed", message: "Failed to download the document. Please try again." })
     }
   }
 

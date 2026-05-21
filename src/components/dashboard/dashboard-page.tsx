@@ -1,8 +1,10 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
+import { logError } from "@/lib/logger"
 import { useRole } from "@/context/role-context"
 import { useAuth } from "@/context/auth-context" 
 import { useTasks } from "@/context/tasks-context"
 import { useEvents } from "@/context/events-context"
+import { GoogleGenerativeAI } from "@google/generative-ai"
 import { Sparkles, Loader2, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AI_FALLBACK_BRIEFS, AI_FALLBACK_DELAY_MS } from "./fallbacks"
@@ -19,19 +21,21 @@ import { VPInternalDashboard } from "./variants/vp-internal-dashboard"
 
 export function DashboardPage() {
   const { role } = useRole()
-  const { user, session } = useAuth()
+  const { user } = useAuth()
   const { tasks } = useTasks()
   const { events } = useEvents()
   
   const [aiSummary, setAiSummary] = useState("Click the refresh icon to generate your executive brief.")
   const [isGenerating, setIsGenerating] = useState(false)
 
-  // The Gemini API key used to be exposed in the browser bundle. The
-  // generation now goes through the `/api/ai/brief` Vite middleware /
-  // serverless function, which keeps the key on the server.
+  const genAI = useMemo(() => {
+    const key = import.meta.env.VITE_GEMINI_API_KEY || "";
+    return new GoogleGenerativeAI(key);
+  }, []);
+
   const generateStrategicBrief = useCallback(async () => {
     if (isGenerating) return;
-
+    
     setIsGenerating(true)
     setAiSummary("Consulting the Chief of Staff...")
 
@@ -41,37 +45,33 @@ export function DashboardPage() {
         .filter(t => t.assignees.includes(activeUserId) && t.status !== 'done')
         .slice(0, 5)
         .map(t => `- ${t.title}`)
+        .join("\n");
 
       const upcomingEvents = events
         .filter(e => new Date(e.startDate) > new Date())
         .slice(0, 3)
         .map(e => `- ${e.title}`)
+        .join("\n");
 
-      const headers: Record<string, string> = { "Content-Type": "application/json" }
-      if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });      
+      const prompt = `Role: ${role}. Tasks: ${pendingTasks || "None"}. Events: ${upcomingEvents || "None"}. Provide a 2-sentence executive summary for the dashboard.`;
 
-      const res = await fetch("/api/ai/brief", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ role, pendingTasks, upcomingEvents }),
-      })
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().trim();
+      setAiSummary(text);
 
-      if (!res.ok) throw new Error(`AI proxy returned ${res.status}`)
-      const data = await res.json()
-      if (typeof data?.summary === "string" && data.summary.trim()) {
-        setAiSummary(data.summary.trim())
-      } else {
-        throw new Error("AI proxy returned no summary")
-      }
-    } catch (error: unknown) {
-      console.warn("Gemini proxy unavailable — using fallback brief for role:", role, error);
+    } catch (error: any) {
+      logError("AI Error", 'DashboardPage', error);
+      console.warn("Gemini API unavailable — using fallback brief for role:", role);
+      
       setTimeout(() => {
         setAiSummary(AI_FALLBACK_BRIEFS[role as string] || AI_FALLBACK_BRIEFS["default"]);
       }, AI_FALLBACK_DELAY_MS);
+
     } finally {
       setIsGenerating(false)
     }
-  }, [tasks, events, user, session, role, isGenerating]);
+  }, [tasks, events, user, genAI, role, isGenerating]);
 
   const renderDashboard = () => {
     switch (role) {

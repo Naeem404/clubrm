@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { logError } from "@/lib/logger";
 import { useAuth } from "@/context/auth-context";
 
 export type Role =
@@ -19,7 +20,7 @@ interface RoleContextType {
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const { user, profile, completeOnboarding } = useAuth();
+  const { user, profile, updateProfile } = useAuth();
   const [role, setRole] = useState<Role>(() => {
     const saved = localStorage.getItem("clubrm-demo-role") as Role;
     return saved || "President";
@@ -38,13 +39,13 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("clubrm-demo-role", newRole);
 
     if (user && profile?.full_name) {
-      const result = await completeOnboarding({
-        fullName: profile.full_name,
-        role: newRole,
-      });
-
-      if (result.error) {
-        console.error("[ClubRM] role update failed:", result.error);
+      try {
+        await updateProfile({
+          full_name: profile.full_name,
+          role: newRole,
+        });
+      } catch (error) {
+        logError("role update failed", 'RoleContext', error);
       }
     }
   };

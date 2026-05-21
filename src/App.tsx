@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
 import { AuthPage } from "@/components/auth/auth-page";
 import { OnboardingPage } from "@/components/auth/onboarding-page";
@@ -7,23 +7,18 @@ import { isOnboardingComplete } from "@/lib/onboarding-logic";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/sidebar";
 import { TopBar } from "@/components/layout/topbar";
-import { ErrorBoundary } from "@/components/error-boundary";
 
 // Context Providers
-import { OrgProvider } from './context/org-context.tsx'
 import { EventsProvider } from './context/events-context.tsx'
 import { TasksProvider } from './context/tasks-context.tsx'
 import { FinanceProvider } from './context/finance-context.tsx'
 import { MembersProvider } from './context/members-context.tsx'
-import { SponsorsProvider } from './context/sponsors-context.tsx'
+import { SponsorsProvider } from './context/sponsors-context.tsx' // Added this
 
-// Variants
+// Variants & Testing
 import { PresidentDashboard } from "@/components/dashboard/variants/president-dashboard";
+import TestDatabase from './Testing/TestDatabase';
 import { ProfilePage } from "@/components/profile/profile-page";
-
-// Public-only routes (no auth required)
-import { PublicEventRSVPPage } from "@/components/public/public-event-rsvp";
-import { InviteAcceptPage } from "@/components/public/invite-accept";
 
 /**
  * Helper function to handle both named and default exports safely
@@ -83,34 +78,9 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Wrap a route element with a scoped ErrorBoundary so a failure in one
- * page doesn't take down the chrome (sidebar, topbar, layout).
- */
-function Bounded({ scope, children }: { scope: string; children: React.ReactNode }) {
-  return <ErrorBoundary scope={scope}>{children}</ErrorBoundary>;
-}
-
 function App() {
   const { user, profile, loading, profileLoading } = useAuth();
-  const location = useLocation();
   const onboardingComplete = isOnboardingComplete(profile)
-
-  // Public routes that bypass auth entirely (event RSVP, invite acceptance)
-  const isPublicRoute =
-    location.pathname.startsWith("/rsvp/") ||
-    location.pathname.startsWith("/join/")
-
-  if (isPublicRoute) {
-    return (
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/rsvp/:eventId" element={<Bounded scope="Public RSVP"><PublicEventRSVPPage /></Bounded>} />
-          <Route path="/join/:inviteToken" element={<Bounded scope="Invite Accept"><InviteAcceptPage /></Bounded>} />
-        </Routes>
-      </Suspense>
-    )
-  }
 
   // 1. Handle Initial Bootup Loading
   if (loading || (user && profileLoading)) {
@@ -132,42 +102,40 @@ function App() {
   }
 
   // 3. Authenticated Application
-  // Feature providers are mounted ONCE here, after auth, so they receive
-  // a valid session before issuing any Supabase queries. The `key={user.id}`
-  // forces a clean re-mount when a different user signs in.
   return (
-    <OrgProvider>
-      <MembersProvider key={user.id}>
-        <EventsProvider>
-          <TasksProvider>
-            <FinanceProvider>
-              <SponsorsProvider>
-                <Layout>
-                  <Routes>
-                    <Route path="/" element={<Bounded scope="Dashboard"><PresidentDashboard /></Bounded>} />
-                    <Route path="/dashboard" element={<Bounded scope="Dashboard"><DashboardPage /></Bounded>} />
-                    <Route path="/members" element={<Bounded scope="Members"><MembersPage /></Bounded>} />
-                    <Route path="/tasks" element={<Bounded scope="Tasks"><TasksPage /></Bounded>} />
-                    <Route path="/events" element={<Bounded scope="Events"><EventsPage /></Bounded>} />
-                    <Route path="/finance" element={<Bounded scope="Finance"><FinancePage /></Bounded>} />
-                    <Route path="/external" element={<Bounded scope="External"><ExternalPage /></Bounded>} />
-                    <Route path="/contacts" element={<Bounded scope="Contacts"><ContactsPage /></Bounded>} />
-                    <Route path="/marketing" element={<Bounded scope="Marketing"><MarketingPage /></Bounded>} />
-                    <Route path="/documents" element={<Bounded scope="Documents"><DocumentsPage /></Bounded>} />
-                    <Route path="/reports" element={<Bounded scope="Reports"><ReportsPage /></Bounded>} />
-                    <Route path="/settings" element={<Bounded scope="Settings"><SettingsPage /></Bounded>} />
-                    <Route path="/profile" element={<Bounded scope="Profile"><ProfilePage /></Bounded>} />
-
-                    {/* Fallback for unknown routes */}
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </Layout>
-              </SponsorsProvider>
-            </FinanceProvider>
-          </TasksProvider>
-        </EventsProvider>
-      </MembersProvider>
-    </OrgProvider>
+    <MembersProvider key={user.id}>
+      <EventsProvider>
+        <TasksProvider>
+          <FinanceProvider>
+            <SponsorsProvider>
+              <Layout>
+                <Routes>
+                  {/* Default Route uses PresidentDashboard from shivam branch */}
+                  <Route path="/" element={<PresidentDashboard />} />
+                  
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/members" element={<MembersPage />} />
+                  <Route path="/tasks" element={<TasksPage />} />
+                  <Route path="/events" element={<EventsPage />} />
+                  <Route path="/finance" element={<FinancePage />} />
+                  <Route path="/external" element={<ExternalPage />} />
+                  <Route path="/contacts" element={<ContactsPage />} />
+                  <Route path="/marketing" element={<MarketingPage />} />
+                  <Route path="/documents" element={<DocumentsPage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/test-db" element={<TestDatabase />} />
+                  
+                  {/* Fallback for unknown routes */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Layout>
+            </SponsorsProvider>
+          </FinanceProvider>
+        </TasksProvider>
+      </EventsProvider>
+    </MembersProvider>
   );
 }
 

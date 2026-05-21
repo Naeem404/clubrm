@@ -4,27 +4,39 @@ import './index.css'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from './context/auth-context.tsx'
 import { RoleProvider } from './context/role-context.tsx'
+import { EventsProvider } from './context/events-context.tsx'
+import { TasksProvider } from './context/tasks-context.tsx'
+import { FinanceProvider } from './context/finance-context.tsx'
+import { MembersProvider } from './context/members-context.tsx'
 import { ThemeProvider } from './context/theme-context.tsx'
-import { ErrorBoundary } from './components/error-boundary.tsx'
+import { SponsorsProvider } from './context/sponsors-context.tsx'
+import { ToastProvider } from './context/toast-context.tsx'
+import { ToastContainer } from './components/ui/toast.tsx'
 import App from './App.tsx'
 
-// Feature-data providers (Members, Events, Tasks, Finance, Sponsors) are mounted
-// inside App.tsx AFTER authentication. Mounting them here would cause every
-// provider to fire its initial Supabase load before the user is signed in,
-// resulting in unauthenticated queries, ghost network calls, and duplicate
-// state when the authenticated tree mounts the providers a second time.
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ErrorBoundary>
-      <BrowserRouter>
-        <ThemeProvider>
+    <BrowserRouter>
+      <ThemeProvider>
+        <ToastProvider>
           <AuthProvider>
             <RoleProvider>
-              <App />
+              <MembersProvider>
+                <SponsorsProvider>
+                  <EventsProvider>
+                    <TasksProvider>
+                      <FinanceProvider>
+                        <App />
+                      </FinanceProvider>
+                    </TasksProvider>
+                  </EventsProvider>
+                </SponsorsProvider>
+              </MembersProvider>
             </RoleProvider>
           </AuthProvider>
-        </ThemeProvider>
-      </BrowserRouter>
-    </ErrorBoundary>
+          <ToastContainer />
+        </ToastProvider>
+      </ThemeProvider>
+    </BrowserRouter>
   </React.StrictMode>
 )

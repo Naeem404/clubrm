@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { FinanceProvider, useFinance, SEED_EXPENSES } from "../../src/context/finance-context"
 import type { ReactNode } from "react"
-import React from "react"
 
 const { mockFinanceSupabase } = vi.hoisted(() => {
   const budget = { total_budget: 18000, term_label: "Fall 2026" };
@@ -37,19 +36,8 @@ vi.mock("../../src/lib/supabase", () => ({
   supabaseUntyped: mockFinanceSupabase,
 }));
 
-const MockAuthProvider = ({ children }: { children: ReactNode }) => <>{children}</>;
-
-vi.mock("../../src/context/auth-context", () => ({
-  AuthProvider: MockAuthProvider,
-  useAuth: () => ({ user: { id: 'test-org-id' } })
-}));
-
 function wrapper({ children }: { children: ReactNode }) {
-  return (
-    <MockAuthProvider>
-      <FinanceProvider initialExpenses={SEED_EXPENSES}>{children}</FinanceProvider>
-    </MockAuthProvider>
-  )
+  return <FinanceProvider initialExpenses={SEED_EXPENSES}>{children}</FinanceProvider>
 }
 
 describe("FinanceContext", () => {

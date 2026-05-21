@@ -4,7 +4,6 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 import { defineConfig, loadEnv } from 'vite'
 import { createClient } from '@supabase/supabase-js'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 
 // ─── Shared helpers (mirror of api/stats.ts) ─────────────────
 function groupCount(items: any[], key: string) {
@@ -50,45 +49,7 @@ export default defineConfig(({ mode }) => {
       {
         name: 'dashboard-api',
         configureServer(server) {
-          // ─── AI brief proxy (keeps Gemini key off the client) ──────
-          const geminiKey = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || ''
-          const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null
-
           server.middlewares.use(async (req: any, res: any, next: any) => {
-            if (req.url === '/api/ai/brief' && req.method === 'POST') {
-              try {
-                if (!genAI) {
-                  res.statusCode = 503
-                  res.setHeader('Content-Type', 'application/json')
-                  return res.end(JSON.stringify({ error: 'GEMINI_API_KEY is not configured' }))
-                }
-                const chunks: Buffer[] = []
-                for await (const chunk of req) chunks.push(chunk as Buffer)
-                const raw = Buffer.concat(chunks).toString('utf8') || '{}'
-                let body: any
-                try { body = JSON.parse(raw) } catch { body = {} }
-                const role = String(body?.role ?? 'executive')
-                const tasks = Array.isArray(body?.pendingTasks) ? body.pendingTasks.join('\n') : String(body?.pendingTasks ?? 'None')
-                const events = Array.isArray(body?.upcomingEvents) ? body.upcomingEvents.join('\n') : String(body?.upcomingEvents ?? 'None')
-                const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-                const prompt = [
-                  `You are a chief of staff briefing a student club ${role}.`,
-                  `Pending tasks:\n${tasks || 'None'}`,
-                  `Upcoming events:\n${events || 'None'}`,
-                  `Write a 2-sentence, action-oriented executive brief. No greetings.`,
-                ].join('\n\n')
-                const result = await model.generateContent(prompt)
-                const summary = result.response.text().trim()
-                res.setHeader('Content-Type', 'application/json')
-                return res.end(JSON.stringify({ summary }))
-              } catch (err: any) {
-                console.error('[ai/brief] middleware error:', err)
-                res.statusCode = 500
-                res.setHeader('Content-Type', 'application/json')
-                return res.end(JSON.stringify({ error: err?.message || 'AI request failed' }))
-              }
-            }
-
             if (req.url === '/api/dashboard/stats') {
               try {
                 const authHeader = req.headers['authorization']

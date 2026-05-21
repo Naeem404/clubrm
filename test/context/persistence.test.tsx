@@ -3,7 +3,6 @@ import { renderHook, act, waitFor } from "@testing-library/react"
 import { FinanceProvider, useFinance } from "../../src/context/finance-context"
 import { SponsorsProvider, useSponsors } from "../../src/context/sponsors-context"
 import React from 'react'
-import type { ReactNode } from 'react'
 
 const mockChain = vi.hoisted(() => ({
   from: vi.fn().mockReturnThis(),
@@ -29,13 +28,6 @@ vi.mock("../../src/lib/supabase", () => ({
   supabaseUntyped: mockChain,
 }))
 
-const MockAuthProvider = ({ children }: { children: ReactNode }) => <>{children}</>;
-
-vi.mock("../../src/context/auth-context", () => ({
-  AuthProvider: MockAuthProvider,
-  useAuth: () => ({ user: { id: 'test-org-id' } })
-}));
-
 describe("Persistence and State Sync", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -53,11 +45,7 @@ describe("Persistence and State Sync", () => {
     }))
 
     const { result } = renderHook(() => useFinance(), {
-      wrapper: ({ children }) => (
-        <MockAuthProvider>
-          <FinanceProvider>{children}</FinanceProvider>
-        </MockAuthProvider>
-      )
+      wrapper: ({ children }) => <FinanceProvider>{children}</FinanceProvider>
     })
 
     await act(async () => {
@@ -68,11 +56,7 @@ describe("Persistence and State Sync", () => {
 
   it("calls supabase.insert on addContact", async () => {
     const { result } = renderHook(() => useSponsors(), {
-      wrapper: ({ children }) => (
-        <MockAuthProvider>
-          <SponsorsProvider>{children}</SponsorsProvider>
-        </MockAuthProvider>
-      )
+      wrapper: ({ children }) => <SponsorsProvider>{children}</SponsorsProvider>
     })
 
     await act(async () => {

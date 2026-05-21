@@ -56,6 +56,7 @@ export interface Database {
           tasks_completed: number
           events_attended: number
           bio: string | null
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -73,6 +74,7 @@ export interface Database {
           tasks_completed?: number
           events_attended?: number
           bio?: string | null
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -89,6 +91,7 @@ export interface Database {
           tasks_completed?: number
           events_attended?: number
           bio?: string | null
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -110,6 +113,7 @@ export interface Database {
           registered: number | null
           is_public: boolean
           status: string
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -129,6 +133,7 @@ export interface Database {
           registered?: number | null
           is_public?: boolean
           status?: string
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -147,6 +152,7 @@ export interface Database {
           registered?: number | null
           is_public?: boolean
           status?: string
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -167,6 +173,7 @@ export interface Database {
           dependencies: string[]
           subtasks: Json
           section: string | null
+          organization_id: string | null
           updated_at: string
         }
         Insert: {
@@ -184,6 +191,7 @@ export interface Database {
           dependencies?: string[]
           subtasks?: Json
           section?: string | null
+          organization_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -199,6 +207,7 @@ export interface Database {
           dependencies?: string[]
           subtasks?: Json
           section?: string | null
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -215,6 +224,7 @@ export interface Database {
           approved_by: string | null
           receipt_url: string | null
           notes: string | null
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -229,6 +239,7 @@ export interface Database {
           approved_by?: string | null
           receipt_url?: string | null
           notes?: string | null
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -242,6 +253,7 @@ export interface Database {
           approved_by?: string | null
           receipt_url?: string | null
           notes?: string | null
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -259,6 +271,7 @@ export interface Database {
           approved_by: string | null
           paid_date: string | null
           notes: string | null
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -274,6 +287,7 @@ export interface Database {
           approved_by?: string | null
           paid_date?: string | null
           notes?: string | null
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -288,6 +302,7 @@ export interface Database {
           approved_by?: string | null
           paid_date?: string | null
           notes?: string | null
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -301,6 +316,7 @@ export interface Database {
           date: string
           notes: string | null
           recurring: boolean
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -312,6 +328,7 @@ export interface Database {
           date: string
           notes?: string | null
           recurring?: boolean
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -322,6 +339,7 @@ export interface Database {
           date?: string
           notes?: string | null
           recurring?: boolean
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -331,6 +349,7 @@ export interface Database {
           id: string
           total_budget: number
           term_label: string
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -338,12 +357,14 @@ export interface Database {
           id?: string
           total_budget: number
           term_label: string
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           total_budget?: number
           term_label?: string
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -362,6 +383,7 @@ export interface Database {
           interactions: Json
           notes: string | null
           industry: string
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -378,6 +400,7 @@ export interface Database {
           interactions?: Json
           notes?: string | null
           industry: string
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -393,6 +416,7 @@ export interface Database {
           interactions?: Json
           notes?: string | null
           industry?: string
+          organization_id?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -411,6 +435,7 @@ export interface Database {
           reach: number
           engagement: number
           tags: string[]
+          organization_id: string | null
           created_at: string
           updated_at: string
         }
@@ -427,6 +452,7 @@ export interface Database {
           reach?: number
           engagement?: number
           tags?: string[]
+          organization_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -442,7 +468,259 @@ export interface Database {
           reach?: number
           engagement?: number
           tags?: string[]
+          organization_id?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      org_settings: {
+        Row: {
+          id: string
+          name: string
+          slug: string
+          description: string
+          email: string
+          website: string
+          university: string
+          term: string
+          timezone: string
+          notification_prefs: Json
+          theme: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          slug: string
+          description?: string
+          email: string
+          website?: string
+          university?: string
+          term?: string
+          timezone?: string
+          notification_prefs?: Json
+          theme?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          name?: string
+          slug?: string
+          description?: string
+          email?: string
+          website?: string
+          university?: string
+          term?: string
+          timezone?: string
+          notification_prefs?: Json
+          theme?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      member_invites: {
+        Row: {
+          id: string
+          organization_id: string | null
+          organization_name: string | null
+          role: string
+          email: string | null
+          token: string
+          expires_at: string | null
+          used_at: string | null
+          created_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id?: string | null
+          organization_name?: string | null
+          role: string
+          email?: string | null
+          token: string
+          expires_at?: string | null
+          used_at?: string | null
+          created_by: string
+          created_at?: string
+        }
+        Update: {
+          organization_id?: string | null
+          organization_name?: string | null
+          role?: string
+          email?: string | null
+          token?: string
+          expires_at?: string | null
+          used_at?: string | null
+          created_by?: string
+        }
+        Relationships: []
+      }
+      event_rsvps: {
+        Row: {
+          id: string
+          event_id: string
+          name: string
+          email: string
+          rsvped_at: string
+        }
+        Insert: {
+          id?: string
+          event_id: string
+          name: string
+          email: string
+          rsvped_at?: string
+        }
+        Update: {
+          event_id?: string
+          name?: string
+          email?: string
+          rsvped_at?: string
+        }
+        Relationships: []
+      }
+      sponsor_contacts: {
+        Row: {
+          id: string
+          sponsor_id: string
+          name: string
+          email: string
+          title: string
+          phone: string
+          organization: string
+          tags: string[]
+          notes: string | null
+          last_contact: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          sponsor_id: string
+          name: string
+          email: string
+          title: string
+          phone: string
+          organization: string
+          tags?: string[]
+          notes?: string | null
+          last_contact?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          sponsor_id?: string
+          name?: string
+          email?: string
+          title?: string
+          phone?: string
+          organization?: string
+          tags?: string[]
+          notes?: string | null
+          last_contact?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      stripe_sessions: {
+        Row: {
+          id: string
+          user_id: string
+          session_id: string
+          amount: number
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          session_id: string
+          amount: number
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          session_id?: string
+          amount?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      socials: {
+        Row: {
+          id: string
+          user_id: string
+          full_name: string
+          bio: string | null
+          phone: string | null
+          instagram: string
+          facebook: string
+          linkedin: string
+          twitter: string
+          tiktok: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          full_name: string
+          bio?: string | null
+          phone?: string | null
+          instagram: string
+          facebook: string
+          linkedin: string
+          twitter: string
+          tiktok: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          full_name?: string
+          bio?: string | null
+          phone?: string | null
+          instagram?: string
+          facebook?: string
+          linkedin?: string
+          twitter?: string
+          tiktok?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      documents: {
+        Row: {
+          id: string
+          name: string
+          category: "governance" | "finance" | "events" | "other"
+          file_type: string
+          size: string
+          uploaded_at: string
+          uploaded_by: string
+          storage_path: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          category: "governance" | "finance" | "events" | "other"
+          file_type: string
+          size: string
+          uploaded_at?: string
+          uploaded_by: string
+          storage_path: string
+        }
+        Update: {
+          name?: string
+          category?: "governance" | "finance" | "events" | "other"
+          file_type?: string
+          size?: string
+          uploaded_by?: string
+          storage_path?: string
         }
         Relationships: []
       }

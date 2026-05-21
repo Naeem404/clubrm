@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { TasksProvider, useTasks, SEED_TASKS } from "../../src/context/tasks-context"
 import type { ReactNode } from "react"
-import React from "react"
 
 const { mockSupabase } = vi.hoisted(() => {
   const tasks = [{ id: "seed-1", title: "Seed Task", status: "backlog", priority: "medium", section: "General", subtasks: [], created_at: new Date().toISOString() }];
@@ -28,19 +27,8 @@ vi.mock("../../src/lib/supabase", () => ({
   supabaseUntyped: mockSupabase,
 }));
 
-const MockAuthProvider = ({ children }: { children: ReactNode }) => <>{children}</>;
-
-vi.mock("../../src/context/auth-context", () => ({
-  AuthProvider: MockAuthProvider,
-  useAuth: () => ({ user: { id: 'test-org-id' } })
-}));
-
 function wrapper({ children }: { children: ReactNode }) {
-  return (
-    <MockAuthProvider>
-      <TasksProvider initialTasks={SEED_TASKS}>{children}</TasksProvider>
-    </MockAuthProvider>
-  )
+  return <TasksProvider initialTasks={SEED_TASKS}>{children}</TasksProvider>
 }
 
 describe("TasksContext", () => {
@@ -94,12 +82,12 @@ describe("TasksContext", () => {
     
     const task = result.current.tasks[0]
     await act(async () => {
-      await result.current.moveTask(task.id, "in_progress")
+      await result.current.moveTask(task.id, "in-progress")
     })
 
     await waitFor(() => {
       const moved = result.current.tasks.find((t) => t.id === task.id)
-      expect(moved?.status).toBe("in_progress")
+      expect(moved?.status).toBe("in-progress")
     })
   })
 })

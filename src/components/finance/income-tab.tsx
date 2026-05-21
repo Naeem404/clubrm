@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useFinance } from "@/context/finance-context"
-import { useAuth } from "@/context/auth-context"
 import {
   type Income,
   type IncomeType,
@@ -38,7 +37,6 @@ import {
   ArrowDown,
   Target,
   TrendingUp,
-  CreditCard,
 } from "lucide-react"
 
 // Matches your Marketing page palette exactly
@@ -53,7 +51,6 @@ const CHART_COLORS = [
 
 export function IncomeTab() {
   const { income, addIncome, deleteIncome, totalIncome } = useFinance()
-  const { user } = useAuth()
   const [searchParams] = useSearchParams()
 
   // --- State ---
@@ -65,11 +62,6 @@ export function IncomeTab() {
   const [newDate, setNewDate] = useState(format(new Date(), "yyyy-MM-dd"))
   const [newRecurring, setNewRecurring] = useState(false)
   const [newNotes, setNewNotes] = useState("")
-  const [checkoutAmount, setCheckoutAmount] = useState("")
-  const [checkoutSource, setCheckoutSource] = useState("Club Payment")
-  const [checkoutCategory, setCheckoutCategory] = useState("dues")
-  const [checkoutLoading, setCheckoutLoading] = useState(false)
-  const [checkoutError, setCheckoutError] = useState("")
   const [sortConfig, setSortConfig] = useState<{ key: "date" | "source" | "type" | "amount"; direction: "asc" | "desc" }>({ 
     key: "date", 
     direction: "desc" 
@@ -147,37 +139,6 @@ export function IncomeTab() {
     addIncome(inc)
     setModalOpen(false)
     setNewSource(""); setNewAmount(""); setNewType("dues"); setNewRecurring(false); setNewNotes("");
-  }
-
-  const handleStripeCheckout = async () => {
-    setCheckoutError("")
-    const amount = Number(checkoutAmount)
-    if (!Number.isFinite(amount) || amount < 0.5) {
-      setCheckoutError("Enter an amount of at least $0.50 CAD.")
-      return
-    }
-
-    setCheckoutLoading(true)
-    try {
-      const res = await fetch("/api/stripe/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount,
-          source: checkoutSource,
-          userId: user?.id,
-          category: checkoutCategory,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Unable to start Stripe Checkout.")
-      if (!data.url) throw new Error("Stripe did not return a checkout URL.")
-      window.location.href = data.url
-    } catch (error: any) {
-      setCheckoutError(error.message || "Unable to start Stripe Checkout.")
-    } finally {
-      setCheckoutLoading(false)
-    }
   }
 
   return (
@@ -283,41 +244,6 @@ export function IncomeTab() {
         <Button size="sm" className="rounded-xl shadow-lg shadow-primary/20 font-bold px-5 h-10" onClick={() => setModalOpen(true)}>
           <Plus className="h-4 w-4 mr-2" /> Add Income
         </Button>
-      </div>
-
-      <div className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="stripe-source">Payment name</Label>
-            <Input id="stripe-source" value={checkoutSource} onChange={(e) => setCheckoutSource(e.target.value)} placeholder="e.g. Club Dues" />
-          </div>
-          <div className="w-full space-y-1.5 lg:w-32">
-            <Label htmlFor="stripe-category">Category</Label>
-            <select
-              id="stripe-category"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-              value={checkoutCategory}
-              onChange={(e) => setCheckoutCategory(e.target.value)}
-            >
-              <option value="dues">Dues</option>
-              <option value="donation">Donation</option>
-              <option value="sponsorship">Sponsorship</option>
-              <option value="fundraising">Fundraising</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-          <div className="w-full space-y-1.5 lg:w-40">
-            <Label htmlFor="stripe-amount">Amount (CAD)</Label>
-            <Input id="stripe-amount" type="number" min="0.5" step="0.01" value={checkoutAmount} onChange={(e) => setCheckoutAmount(e.target.value)} placeholder="25.00" />
-          </div>
-          <Button className="h-10 rounded-xl font-bold" onClick={handleStripeCheckout} disabled={checkoutLoading}>
-            <CreditCard className="h-4 w-4 mr-2" />
-            {checkoutLoading ? "Starting…" : "Pay with Stripe"}
-          </Button>
-        </div>
-        {checkoutError && <p className="mt-2 text-xs font-medium text-destructive">{checkoutError}</p>}
-        {searchParams.get("stripe") === "success" && <p className="mt-2 text-xs font-medium text-emerald-500">Stripe payment completed successfully. Income will be recorded automatically.</p>}
-        {searchParams.get("stripe") === "cancelled" && <p className="mt-2 text-xs font-medium text-muted-foreground">Stripe payment was cancelled.</p>}
       </div>
 
       {/* ── Income Table ── */}

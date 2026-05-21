@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { cn } from "@/lib/utils";
 import { Widget } from "./widget";
 import { ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
@@ -17,7 +18,7 @@ interface StatCardProps {
   className?: string;
 }
 
-export function StatCard({
+export const StatCard = React.memo(function StatCard({
   title,
   value,
   description,
@@ -59,4 +60,4 @@ export function StatCard({
       </div>
     </Widget>
   );
-}
+});

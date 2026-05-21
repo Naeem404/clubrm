@@ -1,3 +1,4 @@
+import React from "react";
 import { type CalendarEvent, getEventColor, getTag } from "./types"
 import { cn } from "@/lib/utils"
 import { Clock, MapPin, Users } from "lucide-react"
@@ -9,7 +10,7 @@ interface EventCardProps {
   onClick?: (event: CalendarEvent) => void
 }
 
-export function EventCard({ event, compact = false, onClick }: EventCardProps) {
+export const EventCard = React.memo(function EventCard({ event, compact = false, onClick }: EventCardProps) {
   const color = getEventColor(event.colorId)
 
   if (compact) {
@@ -122,4 +123,4 @@ export function EventCard({ event, compact = false, onClick }: EventCardProps) {
       </div>
     </button>
   )
-}
+});

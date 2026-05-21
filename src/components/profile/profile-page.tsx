@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { useAuth } from "@/context/auth-context"
-import { supabaseUntyped as db } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase"
 import { cn, getInitials } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -100,7 +100,7 @@ export function ProfilePage() {
     if (!user) return
     async function load() {
       setLoading(true)
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("socials")
         .select("*")
         .eq("user_id", user!.id)
@@ -147,9 +147,9 @@ export function ProfilePage() {
     }
 
     if (profileId) {
-      await db.from("socials").update(payload).eq("id", profileId)
+      await supabase.from("socials").update(payload).eq("id", profileId)
     } else {
-      const { data } = await db.from("socials").insert(payload).select().single()
+      const { data } = await supabase.from("socials").insert(payload).select().single()
       if (data) setProfileId(data.id)
     }
 

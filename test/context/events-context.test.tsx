@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { EventsProvider, useEvents, SEED_EVENTS } from "../../src/context/events-context"
 import type { ReactNode } from "react"
-import React from "react"
 
 const { mockSupabase } = vi.hoisted(() => {
   const events = [{ id: "e1", title: "Seed Event", start_date: new Date().toISOString(), end_date: new Date().toISOString(), all_day: false }];
@@ -28,19 +27,8 @@ vi.mock("../../src/lib/supabase", () => ({
   supabaseUntyped: mockSupabase,
 }));
 
-const MockAuthProvider = ({ children }: { children: ReactNode }) => <>{children}</>;
-
-vi.mock("../../src/context/auth-context", () => ({
-  AuthProvider: MockAuthProvider,
-  useAuth: () => ({ user: { id: 'test-org-id' } })
-}));
-
 function wrapper({ children }: { children: ReactNode }) {
-  return (
-    <MockAuthProvider>
-      <EventsProvider initialEvents={SEED_EVENTS}>{children}</EventsProvider>
-    </MockAuthProvider>
-  )
+  return <EventsProvider initialEvents={SEED_EVENTS}>{children}</EventsProvider>
 }
 
 describe("EventsContext", () => {
