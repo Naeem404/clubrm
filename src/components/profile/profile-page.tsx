@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react"
 import { useAuth } from "@/context/auth-context"
 import { supabase } from "@/lib/supabase"
 import { cn, getInitials } from "@/lib/utils"
+import { safeExternalUrl } from "@/lib/safe-url"
+import { useToast } from "@/context/toast-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -70,21 +72,43 @@ const SOCIAL_FIELDS: {
   { key: "tiktok", label: "TikTok", placeholder: "username", icon: <TikTokIcon className="h-4 w-4" />, color: "text-foreground", prefix: "tiktok.com/@" },
 ]
 
-function buildSocialUrl(key: keyof SocialLinks, value: string): string {
-  if (!value) return ""
-  if (value.startsWith("http")) return value
-  const bases: Record<keyof SocialLinks, string> = {
-    instagram: "https://instagram.com/",
-    facebook: "https://facebook.com/",
-    linkedin: "https://linkedin.com/in/",
-    twitter: "https://x.com/",
-    tiktok: "https://tiktok.com/@",
+const SOCIAL_BASES: Record<keyof SocialLinks, string> = {
+  instagram: "https://instagram.com/",
+  facebook: "https://facebook.com/",
+  linkedin: "https://linkedin.com/in/",
+  twitter: "https://x.com/",
+  tiktok: "https://tiktok.com/@",
+}
+
+const SOCIAL_HOSTS: Record<keyof SocialLinks, readonly string[]> = {
+  instagram: ["instagram.com"],
+  facebook: ["facebook.com", "fb.com"],
+  linkedin: ["linkedin.com"],
+  twitter: ["x.com", "twitter.com"],
+  tiktok: ["tiktok.com"],
+}
+
+/**
+ * Build a safe https URL for a social handle or full profile URL.
+ * Returns null for anything that isn't an http(s) URL on the expected network
+ * (e.g. `javascript:` payloads), so it is never rendered into an href.
+ */
+function buildSocialUrl(key: keyof SocialLinks, value: string): string | null {
+  const trimmed = (value ?? "").trim()
+  if (!trimmed) return null
+  // Full URL (or something with a scheme / domain) -> validate against the network's hosts
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith("//") || /^(www\.)?[^/\s]+\.[a-z]{2,}\//i.test(trimmed)) {
+    return safeExternalUrl(trimmed, { allowedHosts: SOCIAL_HOSTS[key] })
   }
-  return bases[key] + value.replace(/^@/, "")
+  // Plain username
+  const handle = trimmed.replace(/^@/, "")
+  return safeExternalUrl(SOCIAL_BASES[key] + encodeURIComponent(handle), { allowedHosts: SOCIAL_HOSTS[key] })
 }
 
 export function ProfilePage() {
   const { user } = useAuth()
+  const { showToast } = useToast()
+  const [saving, setSaving] = useState(false)
   const [profileId, setProfileId] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -146,16 +170,32 @@ export function ProfilePage() {
       updated_at: new Date().toISOString(),
     }
 
-    if (profileId) {
-      await supabase.from("socials").update(payload).eq("id", profileId)
-    } else {
-      const { data } = await supabase.from("socials").insert(payload).select().single()
-      if (data) setProfileId(data.id)
+    setSaving(true)
+    try {
+      if (profileId) {
+        const { error } = await supabase.from("socials").update(payload).eq("id", profileId)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from("socials").insert(payload).select().single()
+        if (error) throw error
+        if (data) setProfileId(data.id)
+      }
+    } catch (err: any) {
+      setSaved(false)
+      showToast({
+        type: "error",
+        title: "Could not save profile",
+        message: err?.message ?? "Please check your connection and try again.",
+      })
+      return
+    } finally {
+      setSaving(false)
     }
 
+    showToast({ type: "success", title: "Profile saved" })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [user, profile, profileId])
+  }, [user, profile, profileId, showToast])
 
   const displayName = profile.fullName || user?.email || "User"
   const email = user?.email ?? ""
@@ -182,8 +222,10 @@ export function ProfilePage() {
               if (!value) return null
               const field = SOCIAL_FIELDS.find((f) => f.key === key)
               if (!field) return null
+              const href = buildSocialUrl(key as keyof SocialLinks, value)
+              if (!href) return null
               return (
-                <a key={key} href={buildSocialUrl(key as keyof SocialLinks, value)} target="_blank" rel="noopener noreferrer" className={cn("hover:opacity-70 transition-opacity", field.color)} title={field.label}>
+                <a key={key} href={href} target="_blank" rel="noopener noreferrer" className={cn("hover:opacity-70 transition-opacity", field.color)} title={field.label}>
                   {field.icon}
                 </a>
               )
@@ -258,9 +300,9 @@ export function ProfilePage() {
                     style={{ paddingLeft: `calc(0.75rem + ${field.prefix.length * 7}px)` }}
                   />
                 </div>
-                {profile.socials[field.key] && (
+                {buildSocialUrl(field.key, profile.socials[field.key]) && (
                   <a
-                    href={buildSocialUrl(field.key, profile.socials[field.key])}
+                    href={buildSocialUrl(field.key, profile.socials[field.key]) ?? undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     className={cn("h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-border/50 hover:bg-muted/50 transition-colors", field.color)}
@@ -277,9 +319,9 @@ export function ProfilePage() {
 
       {/* Save */}
       <div className="flex justify-end pb-6">
-        <Button onClick={handleSave} className="gap-2 min-w-[140px]">
+        <Button onClick={handleSave} disabled={saving || loading} className="gap-2 min-w-[140px]">
           {saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-          {saved ? "Saved!" : "Save Profile"}
+          {saving ? "Saving..." : saved ? "Saved!" : "Save Profile"}
         </Button>
       </div>
     </div>

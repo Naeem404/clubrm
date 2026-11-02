@@ -2,7 +2,7 @@
   "buildCommand": "npx vite build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/dashboard/stats", "destination": "/api/stats.ts" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/dashboard/stats", "destination": "/api/stats" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

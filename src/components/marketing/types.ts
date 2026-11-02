@@ -15,6 +15,9 @@ export interface Campaign {
   reach: number
   engagement: number
   tags: string[]
+  /** ISO timestamps from the DB (campaigns.created_at / updated_at). */
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface Post {
@@ -59,6 +62,10 @@ export function formatNumber(n: number): string {
   return n.toString()
 }
 
+/**
+ * Sample data for tests / storybook only. The app no longer seeds this into
+ * the database from the client.
+ */
 export const SEED_CAMPAIGNS: Campaign[] = [
   {
     id: "camp1",

@@ -1,23 +1,39 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react"
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { logError } from "@/lib/logger"
-import type { User } from "@supabase/supabase-js"
+import type { Session, User } from "@supabase/supabase-js"
 import type { Database } from "@/lib/database.types"
 
-type Profile = Database["public"]["Tables"]["profiles"]["Row"]
-type Role = string
+export type UserProfile = Database["public"]["Tables"]["profiles"]["Row"]
+type ProfileUpdateRow = Database["public"]["Tables"]["profiles"]["Update"]
+
+/** Columns a user may never change on their own profile from the client. */
+const PROTECTED_PROFILE_KEYS = ["role", "id", "email", "created_at", "updated_at"] as const
+
+/** Fields a user is allowed to update on their own profile. */
+export type SafeProfileUpdate = Omit<ProfileUpdateRow, (typeof PROTECTED_PROFILE_KEYS)[number]>
+
+/** Fields accepted when finishing onboarding (onboarding_completed is set automatically). */
+export type OnboardingUpdate = Omit<SafeProfileUpdate, "onboarding_completed">
+
+/** Warn when the session expires within this many seconds. */
+const SESSION_WARNING_SECONDS = 15 * 60
+const SESSION_CHECK_INTERVAL_MS = 60 * 1000
 
 interface AuthContextType {
   user: User | null
-  profile: Profile | null
-  role: Role | null
+  session: Session | null
+  profile: UserProfile | null
+  /** Raw profiles.role value. Use useRole() for the normalized, typed role. */
+  role: string | null
   loading: boolean
+  profileLoading: boolean
   sessionExpiringSoon: boolean
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string, name: string) => Promise<void>
   signOut: () => Promise<void>
-  updateProfile: (updates: Partial<Profile>) => Promise<void>
-  updateRole: (role: Role) => Promise<void>
+  updateProfile: (updates: SafeProfileUpdate) => Promise<void>
+  completeOnboarding: (updates: OnboardingUpdate) => Promise<void>
   refreshSession: () => Promise<void>
 }
 
@@ -29,87 +45,130 @@ export function useAuth() {
   return context
 }
 
+function sanitizeProfileUpdate(updates: Record<string, unknown>): SafeProfileUpdate {
+  const clean: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(updates)) {
+    if ((PROTECTED_PROFILE_KEYS as readonly string[]).includes(key)) continue
+    if (value === undefined) continue
+    clean[key] = value
+  }
+  return clean as SafeProfileUpdate
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [role, setRole] = useState<Role | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
   const [sessionExpiringSoon, setSessionExpiringSoon] = useState(false)
 
-  useEffect(() => {
-    let mounted = true
-    let sessionCheckInterval: NodeJS.Timeout | null = null
+  const mountedRef = useRef(true)
+  const currentUserIdRef = useRef<string | null>(null)
+  const profileRequestRef = useRef(0)
 
-    async function load() {
+  const loadProfile = useCallback(async (userId: string) => {
+    const requestId = ++profileRequestRef.current
+    setProfileLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle()
+      // Ignore stale responses (user switched / signed out meanwhile)
+      if (!mountedRef.current || requestId !== profileRequestRef.current) return
+      if (error) {
+        logError("profile fetch failed", "AuthContext", error)
+        setProfile(null)
+      } else {
+        setProfile(data ?? null)
+      }
+    } catch (err) {
+      if (mountedRef.current && requestId === profileRequestRef.current) {
+        logError("profile fetch error", "AuthContext", err)
+        setProfile(null)
+      }
+    } finally {
+      if (mountedRef.current && requestId === profileRequestRef.current) {
+        setProfileLoading(false)
+      }
+    }
+  }, [])
+
+  const applySession = useCallback((next: Session | null, forceProfileReload = false) => {
+    setSession(next)
+    setUser(next?.user ?? null)
+
+    const nextUserId = next?.user?.id ?? null
+    const userChanged = nextUserId !== currentUserIdRef.current
+    currentUserIdRef.current = nextUserId
+
+    if (!nextUserId) {
+      profileRequestRef.current++ // invalidate in-flight fetches
+      setProfile(null)
+      setProfileLoading(false)
+      setSessionExpiringSoon(false)
+      return
+    }
+
+    if (userChanged) setProfile(null)
+    if (userChanged || forceProfileReload) {
+      void loadProfile(nextUserId)
+    }
+  }, [loadProfile])
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    async function init() {
       try {
-        const { data: { session }, error: sessionErr } = await supabase.auth.getSession()
-        if (sessionErr) {
-          logError('getSession failed', 'AuthContext', sessionErr)
+        const { data: { session: initial }, error } = await supabase.auth.getSession()
+        if (!mountedRef.current) return
+        if (error) {
+          logError("getSession failed", "AuthContext", error)
           return
         }
-
-        if (session?.user && mounted) {
-          setUser(session.user)
-
-          const { data: profileData, error: profileErr } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", session.user.id)
-            .single()
-
-          if (profileErr) {
-            logError("profile fetch failed", 'AuthContext', profileErr)
-          } else if (profileData && mounted) {
-            setProfile(profileData)
-            setRole(profileData.role || null)
-          }
-
-          // Check session expiry every 5 minutes
-          sessionCheckInterval = setInterval(() => {
-            if (session.expires_at) {
-              const now = Date.now() / 1000
-              const timeUntilExpiry = session.expires_at - now
-              // Warn if session expires in less than 15 minutes
-              if (timeUntilExpiry < 900 && timeUntilExpiry > 0) {
-                setSessionExpiringSoon(true)
-              } else {
-                setSessionExpiringSoon(false)
-              }
-            }
-          }, 300000)
-        }
+        applySession(initial)
       } catch (err) {
-        logError("auth initialization error", 'AuthContext', err)
+        logError("auth initialization error", "AuthContext", err)
       } finally {
-        if (mounted) setLoading(false)
+        if (mountedRef.current) setLoading(false)
       }
     }
 
-    load()
+    init()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return
-      setUser(session?.user || null)
-      if (session?.user) {
-        supabase.from("profiles").select("*").eq("id", session.user.id).single().then(({ data, error }) => {
-          if (!error && data && mounted) {
-            setProfile(data)
-            setRole(data.role || null)
-          }
-        })
-      } else {
-        setProfile(null)
-        setRole(null)
-        setSessionExpiringSoon(false)
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, next) => {
+      if (!mountedRef.current) return
+      // Defer Supabase calls out of the auth callback to avoid client deadlocks.
+      setTimeout(() => {
+        if (!mountedRef.current) return
+        applySession(next, event === "USER_UPDATED")
+      }, 0)
     })
 
     return () => {
-      mounted = false
-      if (sessionCheckInterval) clearInterval(sessionCheckInterval)
+      mountedRef.current = false
       subscription.unsubscribe()
     }
-  }, [])
+  }, [applySession])
+
+  // Session-expiry watcher: always uses the latest session from state.
+  useEffect(() => {
+    const expiresAt = session?.expires_at
+    if (!expiresAt) {
+      setSessionExpiringSoon(false)
+      return
+    }
+    const check = () => {
+      const remaining = expiresAt - Date.now() / 1000
+      setSessionExpiringSoon(remaining > 0 && remaining < SESSION_WARNING_SECONDS)
+    }
+    check()
+    const interval = setInterval(check, SESSION_CHECK_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [session?.expires_at])
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -117,69 +176,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signUp = useCallback(async (email: string, password: string, name: string) => {
-    const { data, error } = await supabase.auth.signUp({
+    // The profile row is created server-side by the `handle_new_user` trigger
+    // (with the least-privileged default role). Never insert it from the client.
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { name }
-      }
+        data: { full_name: name, name },
+      },
     })
     if (error) throw error
-
-    if (data.user) {
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: data.user.id,
-        email: email,
-        full_name: name,
-        role: "member"
-      })
-      if (profileError) throw profileError
-    }
   }, [])
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut()
-  }, [])
-
-  const updateProfile = useCallback(async (updates: Partial<Profile>) => {
-    if (!user) throw new Error("No user logged in")
-    const { error } = await supabase.from("profiles").update(updates).eq("id", user.id)
-    if (error) throw error
-    setProfile(prev => prev ? { ...prev, ...updates } : null)
-  }, [user])
-
-  const updateRole = useCallback(async (newRole: Role) => {
-    if (!user) throw new Error("No user logged in")
-    const { data, error } = await supabase.from("profiles").update({ role: newRole }).eq("id", user.id).select().single()
+    const { error } = await supabase.auth.signOut()
     if (error) {
-      logError("role update failed", 'AuthContext', error)
+      logError("sign out failed", "AuthContext", error)
       throw error
     }
-    if (data) {
-      setRole(data.role)
-      setProfile(data)
-    }
-  }, [user])
-
-  const refreshSession = useCallback(async () => {
-    try {
-      const { data: { session }, error } = await supabase.auth.refreshSession()
-      if (error) {
-        logError("session refresh failed", 'AuthContext', error)
-        throw error
-      }
-      if (session) {
-        setSessionExpiringSoon(false)
-      }
-    } catch (err) {
-      logError("session refresh error", 'AuthContext', err)
-      throw err
-    }
   }, [])
 
-  return (
-    <AuthContext.Provider value={{ user, profile, role, loading, sessionExpiringSoon, signIn, signUp, signOut, updateProfile, updateRole, refreshSession }}>
-      {children}
-    </AuthContext.Provider>
-  )
+  const writeProfile = useCallback(async (updates: SafeProfileUpdate) => {
+    if (!user) throw new Error("No user logged in")
+    const clean = sanitizeProfileUpdate(updates as Record<string, unknown>)
+    if (Object.keys(clean).length === 0) return
+    const { data, error } = await supabase
+      .from("profiles")
+      .update(clean)
+      .eq("id", user.id)
+      .select()
+      .single()
+    if (error) {
+      logError("profile update failed", "AuthContext", error)
+      throw error
+    }
+    if (data && mountedRef.current) setProfile(data)
+  }, [user])
+
+  const updateProfile = useCallback(async (updates: SafeProfileUpdate) => {
+    await writeProfile(updates)
+  }, [writeProfile])
+
+  const completeOnboarding = useCallback(async (updates: OnboardingUpdate) => {
+    await writeProfile({ ...updates, onboarding_completed: true })
+  }, [writeProfile])
+
+  const refreshSession = useCallback(async () => {
+    const { data: { session: refreshed }, error } = await supabase.auth.refreshSession()
+    if (error) {
+      logError("session refresh failed", "AuthContext", error)
+      throw error
+    }
+    if (refreshed) applySession(refreshed)
+  }, [applySession])
+
+  const value: AuthContextType = {
+    user,
+    session,
+    profile,
+    role: profile?.role ?? null,
+    loading,
+    profileLoading,
+    sessionExpiringSoon,
+    signIn,
+    signUp,
+    signOut,
+    updateProfile,
+    completeOnboarding,
+    refreshSession,
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

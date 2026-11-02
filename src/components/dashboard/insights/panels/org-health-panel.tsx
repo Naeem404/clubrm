@@ -19,9 +19,8 @@ const statusColor = {
 
 export function OrgHealthPanel({ data }: { data: OrgHealthInsight | null }) {
   if (!data) return <div className="text-sm text-muted-foreground text-center py-8">Loading health insights…</div>;
-  const delta = data.overallScore - data.previousScore;
-
-  const isUp = delta > 0;
+  const delta = data.previousScore != null ? data.overallScore - data.previousScore : null;
+  const isUp = delta != null && delta > 0;
 
   return (
     <div className="space-y-6">
@@ -32,10 +31,17 @@ export function OrgHealthPanel({ data }: { data: OrgHealthInsight | null }) {
           <span className="text-[10px] text-muted-foreground">/100</span>
         </div>
         <div className="flex-1 space-y-1">
-          <div className={cn("flex items-center gap-1 text-sm font-medium", isUp ? "text-emerald-500" : "text-destructive")}>
-            {isUp ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-            {Math.abs(delta)} points vs last month
-          </div>
+          {delta != null ? (
+            <div className={cn("flex items-center gap-1 text-sm font-medium", isUp ? "text-emerald-500" : "text-destructive")}>
+              {isUp ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
+              {Math.abs(delta)} points vs last month
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">No previous score recorded yet</div>
+          )}
+          {data.trend.length < 2 ? (
+            <p className="text-xs text-muted-foreground">Not enough data for a trend yet.</p>
+          ) : (
           <div className="flex gap-1.5 flex-wrap">
             {data.trend.map((pt) => (
               <div key={pt.label} className="flex flex-col items-center">
@@ -52,6 +58,7 @@ export function OrgHealthPanel({ data }: { data: OrgHealthInsight | null }) {
               </div>
             ))}
           </div>
+          )}
         </div>
       </div>
 
@@ -98,6 +105,7 @@ export function OrgHealthPanel({ data }: { data: OrgHealthInsight | null }) {
           <h4 className="text-sm font-semibold text-emerald-500 flex items-center gap-1">
             <CheckCircle className="h-3.5 w-3.5" /> What's Going Well
           </h4>
+          {data.topStrengths.length === 0 && <p className="text-xs text-muted-foreground pl-5">Nothing notable yet</p>}
           {data.topStrengths.map((s, i) => (
             <p key={i} className="text-xs text-muted-foreground pl-5">• {s}</p>
           ))}
@@ -106,6 +114,7 @@ export function OrgHealthPanel({ data }: { data: OrgHealthInsight | null }) {
           <h4 className="text-sm font-semibold text-destructive flex items-center gap-1">
             <AlertTriangle className="h-3.5 w-3.5" /> Needs Attention
           </h4>
+          {data.topConcerns.length === 0 && <p className="text-xs text-muted-foreground pl-5">No concerns detected</p>}
           {data.topConcerns.map((c, i) => (
             <p key={i} className="text-xs text-muted-foreground pl-5">• {c}</p>
           ))}

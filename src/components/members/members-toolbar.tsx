@@ -1,4 +1,4 @@
-import { Search, LayoutGrid, List } from "lucide-react"
+import { Search, LayoutGrid, List, Download } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +20,9 @@ interface MembersToolbarProps {
   view: "grid" | "table"
   onViewChange: (view: "grid" | "table") => void
   roles: string[]
+  /** When provided, an "Export CSV" button is shown. */
+  onExportCsv?: () => void
+  exportDisabled?: boolean
 }
 
 export function MembersToolbar({
@@ -32,6 +35,8 @@ export function MembersToolbar({
   view,
   onViewChange,
   roles,
+  onExportCsv,
+  exportDisabled,
 }: MembersToolbarProps) {
   return (
     <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -64,6 +69,13 @@ export function MembersToolbar({
           </SelectContent>
         </Select>
       </div>
+      <div className="flex items-center gap-2">
+      {onExportCsv && (
+        <Button variant="outline" size="sm" onClick={onExportCsv} disabled={exportDisabled} className="h-9 gap-2">
+          <Download className="h-4 w-4" />
+          Export CSV
+        </Button>
+      )}
       <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg">
         <Button variant={view === "grid" ? "default" : "ghost"} size="sm" onClick={() => onViewChange("grid")} className="h-8 w-8 p-0">
           <LayoutGrid className="h-4 w-4" />
@@ -71,6 +83,7 @@ export function MembersToolbar({
         <Button variant={view === "table" ? "default" : "ghost"} size="sm" onClick={() => onViewChange("table")} className="h-8 w-8 p-0">
           <List className="h-4 w-4" />
         </Button>
+      </div>
       </div>
     </div>
   )

@@ -4,6 +4,10 @@ import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import type { Json } from "@/lib/database.types"
 import { useTheme, type AccentColor } from "@/context/theme-context"
+import { useAuth } from "@/context/auth-context"
+import { useRole, type Role } from "@/context/role-context"
+import { useToast } from "@/context/toast-context"
+import { ALL_ROLES, ROLE_PERMISSIONS, canManageRoles, hasPermission, isKnownRole } from "@/lib/permissions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,7 +33,49 @@ import {
   Clock,
   Mail,
   CheckCircle,
+  UserCog,
+  Loader2,
+  RefreshCw,
 } from "lucide-react"
+
+interface AccessProfile {
+  id: string
+  email: string
+  full_name: string
+  role: string
+}
+
+interface RpcError {
+  message: string
+  code?: string
+  details?: string | null
+  hint?: string | null
+}
+
+/**
+ * `set_member_role` is not yet in database.types.ts (Functions: {}), so call it
+ * through a minimal typed view of the client. Calling `.rpc` as a method keeps `this` bound.
+ */
+type SetMemberRoleClient = {
+  rpc: (
+    fn: "set_member_role",
+    args: { target_user: string; new_role: string }
+  ) => PromiseLike<{ data: unknown; error: RpcError | null }>
+}
+
+const NOTIFICATION_PREFS_STORAGE_KEY = "clubrm-notification-prefs"
+
+function friendlyRoleError(error: RpcError): string {
+  const msg = `${error.message ?? ""} ${error.details ?? ""}`
+  if (error.code === "42501" || /permission|not allowed|denied|forbidden|unauthori/i.test(msg)) {
+    return "You don't have permission to change this member's role."
+  }
+  if (error.code === "PGRST202" || /could not find the function/i.test(msg)) {
+    return "Role management isn't available yet (set_member_role RPC missing on the database)."
+  }
+  if (/invalid role|check constraint/i.test(msg)) return "That role isn't valid."
+  return "Couldn't update the role. Please try again."
+}
 
 interface OrgSettings {
   name: string
@@ -72,6 +118,12 @@ const ACCENT_COLORS: { name: AccentColor; class: string; label: string }[] = [
 
 export function SettingsPage() {
   const { accentColor, setAccentColor } = useTheme()
+  const { user } = useAuth()
+  const { role } = useRole()
+  const { showToast } = useToast()
+
+  const canManageOrg = hasPermission(role, "settings.manage")
+  const canAssignRoles = canManageRoles(role)
 
   const [settingsId, setSettingsId] = useState<string | null>(null)
   const [org, setOrg] = useState<OrgSettings>({
@@ -85,12 +137,20 @@ export function SettingsPage() {
     timezone: "America/Toronto",
   })
 
-  const [notifications, setNotifications] = useState<NotificationPrefs>({
-    emailDigest: true,
-    taskAssigned: true,
-    eventReminder: true,
-    financeAlerts: true,
-    memberJoined: false,
+  const [notifications, setNotifications] = useState<NotificationPrefs>(() => {
+    const defaults: NotificationPrefs = {
+      emailDigest: true,
+      taskAssigned: true,
+      eventReminder: true,
+      financeAlerts: true,
+      memberJoined: false,
+    }
+    try {
+      const stored = localStorage.getItem(NOTIFICATION_PREFS_STORAGE_KEY)
+      return stored ? { ...defaults, ...JSON.parse(stored) } : defaults
+    } catch {
+      return defaults
+    }
   })
 
   const [theme, setTheme] = useState<"dark" | "light" | "system">("dark")
@@ -121,7 +181,11 @@ export function SettingsPage() {
           term: data.term || "Fall 2026",
           timezone: data.timezone || "America/Toronto",
         })
-        if (data.notification_prefs && typeof data.notification_prefs === "object") {
+        // Org-level prefs act as defaults; a user's saved personal prefs take precedence.
+        const hasPersonalPrefs = (() => {
+          try { return localStorage.getItem(NOTIFICATION_PREFS_STORAGE_KEY) !== null } catch { return false }
+        })()
+        if (!hasPersonalPrefs && data.notification_prefs && typeof data.notification_prefs === "object" && !Array.isArray(data.notification_prefs)) {
           setNotifications((prev) => ({ ...prev, ...(data.notification_prefs as Record<string, unknown>) }))
         }
         if (data.theme) setTheme(data.theme as "dark" | "light" | "system")
@@ -144,17 +208,93 @@ export function SettingsPage() {
       theme,
     }
 
+    if (!canManageOrg) {
+      showToast({ type: "error", title: "Not allowed", message: "Only administrators can change organization settings." })
+      return
+    }
+
     if (settingsId) {
       const { error } = await supabase.from("org_settings").update(payload).eq("id", settingsId)
-      if (error) logError("Failed to save settings", 'SettingsPage', error)
+      if (error) {
+        logError("Failed to save settings", 'SettingsPage', error)
+        showToast({ type: "error", title: "Couldn't save settings", message: "Please try again." })
+        return
+      }
     } else {
       const { data, error } = await supabase.from("org_settings").insert(payload).select().single()
-      if (error) logError("Failed to create settings", 'SettingsPage', error)
+      if (error) {
+        logError("Failed to create settings", 'SettingsPage', error)
+        showToast({ type: "error", title: "Couldn't save settings", message: "Please try again." })
+        return
+      }
       if (data) setSettingsId(data.id)
     }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [org, notifications, theme, settingsId])
+  }, [org, notifications, theme, settingsId, canManageOrg, showToast])
+
+  // Personal notification preferences are stored per-browser (read by the TopBar).
+  const handleSavePreferences = useCallback(() => {
+    try {
+      localStorage.setItem(NOTIFICATION_PREFS_STORAGE_KEY, JSON.stringify(notifications))
+      window.dispatchEvent(new Event("clubrm-settings-updated"))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      logError("Failed to save notification preferences", 'SettingsPage', err)
+      showToast({ type: "error", title: "Couldn't save preferences" })
+    }
+  }, [notifications, showToast])
+
+  // ── Access Management (President / Administrator only) ──
+  const [people, setPeople] = useState<AccessProfile[]>([])
+  const [peopleLoading, setPeopleLoading] = useState(false)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+
+  const loadPeople = useCallback(async () => {
+    if (!canAssignRoles) return
+    setPeopleLoading(true)
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email, full_name, role")
+      .order("full_name", { ascending: true })
+    setPeopleLoading(false)
+    if (error) {
+      logError("Failed to load profiles", 'SettingsPage', error)
+      showToast({ type: "error", title: "Couldn't load members", message: "Please try again." })
+      return
+    }
+    setPeople((data ?? []) as AccessProfile[])
+  }, [canAssignRoles, showToast])
+
+  useEffect(() => {
+    void loadPeople()
+  }, [loadPeople])
+
+  const handleRoleChange = useCallback(async (target: AccessProfile, newRole: Role) => {
+    if (!canAssignRoles || target.role === newRole) return
+    if (target.id === user?.id) {
+      showToast({ type: "warning", title: "You can't change your own role" })
+      return
+    }
+    setUpdatingId(target.id)
+    const { error } = await (supabase as unknown as SetMemberRoleClient).rpc("set_member_role", {
+      target_user: target.id,
+      new_role: newRole,
+    })
+    setUpdatingId(null)
+    if (error) {
+      logError("set_member_role failed", 'SettingsPage', error)
+      showToast({ type: "error", title: "Role not updated", message: friendlyRoleError(error) })
+      return
+    }
+    setPeople((prev) => prev.map((p) => (p.id === target.id ? { ...p, role: newRole } : p)))
+    showToast({
+      type: "success",
+      title: "Role updated",
+      message: `${target.full_name || target.email} is now ${newRole}.`,
+    })
+  }, [canAssignRoles, user?.id, showToast])
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
@@ -164,15 +304,87 @@ export function SettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">Manage your organization, roles, and application preferences</p>
       </div>
 
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs defaultValue={canManageOrg ? "general" : canAssignRoles ? "access" : "notifications"} className="space-y-6">
         <TabsList>
-          <TabsTrigger value="general" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> General</TabsTrigger>
+          {canManageOrg && (
+            <TabsTrigger value="general" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> General</TabsTrigger>
+          )}
+          {canAssignRoles && (
+            <TabsTrigger value="access" className="gap-1.5"><UserCog className="h-3.5 w-3.5" /> Access Management</TabsTrigger>
+          )}
           <TabsTrigger value="roles" className="gap-1.5"><Shield className="h-3.5 w-3.5" /> Roles</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5"><Bell className="h-3.5 w-3.5" /> Notifications</TabsTrigger>
           <TabsTrigger value="appearance" className="gap-1.5"><Palette className="h-3.5 w-3.5" /> Appearance</TabsTrigger>
         </TabsList>
 
+        {/* ── Access Management (President / Administrator) ── */}
+        {canAssignRoles && (
+          <TabsContent value="access">
+            <div className="bg-card border border-border/50 rounded-xl p-6 space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold flex items-center gap-2"><UserCog className="h-4 w-4 text-primary" /> Access Management</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Assign roles to members. Changes are validated by the server and take effect on the member's next page load.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => void loadPeople()} disabled={peopleLoading}>
+                  <RefreshCw className={cn("h-3.5 w-3.5", peopleLoading && "animate-spin")} /> Refresh
+                </Button>
+              </div>
+
+              {peopleLoading && people.length === 0 ? (
+                <div className="flex items-center justify-center py-10 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              ) : people.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">No members found.</p>
+              ) : (
+                <div className="divide-y divide-border/40 border border-border/40 rounded-lg">
+                  {people.map((person) => {
+                    const isSelf = person.id === user?.id
+                    const currentRole = isKnownRole(person.role) ? person.role : undefined
+                    return (
+                      <div key={person.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {person.full_name || person.email}
+                            {isSelf && <span className="ml-2 text-[10px] uppercase text-muted-foreground">(you)</span>}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">{person.email}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {updatingId === person.id && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                          <Select
+                            value={currentRole}
+                            onValueChange={(v) => void handleRoleChange(person, v as Role)}
+                            disabled={isSelf || updatingId !== null}
+                          >
+                            <SelectTrigger className="w-44 h-8 text-xs">
+                              <SelectValue placeholder={person.role || "Unassigned"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ALL_ROLES.map((r) => (
+                                <SelectItem key={r} value={r} className="text-xs">{r}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <p className="text-[11px] text-muted-foreground">
+                You can't change your own role. Ask another President or Administrator if needed.
+              </p>
+            </div>
+          </TabsContent>
+        )}
+
         {/* ── General Settings ── */}
+        {canManageOrg && (
         <TabsContent value="general">
           <div className="bg-card border border-border/50 rounded-xl p-6 space-y-6">
             <div>
@@ -250,6 +462,7 @@ export function SettingsPage() {
             </div>
           </div>
         </TabsContent>
+        )}
 
         {/* ── Roles & Permissions ── */}
         <TabsContent value="roles">
@@ -272,12 +485,9 @@ export function SettingsPage() {
                         <p className="text-xs text-muted-foreground mt-0.5">{roleConfig.description}</p>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm" className="text-xs" disabled>
-                      Edit Permissions
-                    </Button>
                   </div>
                   <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-                    {roleConfig.permissions.map((perm) => (
+                    {(isKnownRole(roleConfig.role) ? ROLE_PERMISSIONS[roleConfig.role] : []).map((perm) => (
                       <span key={perm} className="text-[10px] px-2 py-0.5 rounded-full bg-muted/50 text-muted-foreground font-mono">
                         {perm}
                       </span>
@@ -288,8 +498,10 @@ export function SettingsPage() {
             </div>
 
             <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-              <p className="text-xs text-amber-400 font-medium">Custom role editing will be available once the backend is connected.</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Roles are currently read-only. Permission changes require database integration.</p>
+              <p className="text-xs text-amber-400 font-medium">Role permissions are predefined.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Members are assigned a role by a President or Administrator (Access Management). Your role: <span className="font-medium text-foreground">{role}</span>.
+              </p>
             </div>
           </div>
         </TabsContent>
@@ -339,7 +551,7 @@ export function SettingsPage() {
             </div>
 
             <div className="flex justify-end">
-              <Button onClick={handleSave} className="gap-2">
+              <Button onClick={handleSavePreferences} className="gap-2">
                 {saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
                 {saved ? "Saved!" : "Save Preferences"}
               </Button>

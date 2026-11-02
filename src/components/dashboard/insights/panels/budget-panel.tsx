@@ -19,17 +19,26 @@ const statusIcon = {
 
 export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
   if (!data) return <div className="text-sm text-muted-foreground text-center py-8">Loading budget insights…</div>;
-  const maxMonthly = Math.max(...data.monthlySpend.map((m) => m.value));
+  const maxMonthly = Math.max(0, ...data.monthlySpend.map((m) => m.value));
+  const hasSpendHistory = maxMonthly > 0;
+  const budgetSet = data.budgetSet !== false && data.totalBudget > 0;
 
   return (
     <div className="space-y-6">
       {/* Top-level numbers */}
       <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Budget", value: `$${data.totalBudget.toLocaleString()}`, sub: "this term" },
-          { label: "Spent", value: `$${data.spent.toLocaleString()}`, sub: `${100 - data.percentRemaining}% used` },
-          { label: "Remaining", value: `$${data.remaining.toLocaleString()}`, sub: `${data.percentRemaining}% left` },
-        ].map((s) => (
+        {(budgetSet
+          ? [
+              { label: "Total Budget", value: `$${data.totalBudget.toLocaleString()}`, sub: "this term" },
+              { label: "Spent", value: `$${data.spent.toLocaleString()}`, sub: `${100 - data.percentRemaining}% used` },
+              { label: "Remaining", value: `$${data.remaining.toLocaleString()}`, sub: `${data.percentRemaining}% left` },
+            ]
+          : [
+              { label: "Total Budget", value: "No budget set", sub: "configure in Finance" },
+              { label: "Spent", value: `$${data.spent.toLocaleString()}`, sub: "approved expenses" },
+              { label: "Remaining", value: "—", sub: "no budget to compare" },
+            ]
+        ).map((s) => (
           <div key={s.label} className="p-3 rounded-lg bg-muted/30 border border-border/50 text-center">
             <div className="text-lg font-bold">{s.value}</div>
             <div className="text-[10px] text-muted-foreground">{s.label}</div>
@@ -44,20 +53,26 @@ export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
           <h4 className="text-sm font-semibold flex items-center gap-1.5">
             <TrendingDown className="h-4 w-4 text-muted-foreground" /> Burn Rate
           </h4>
-          <span className={cn("text-sm font-bold", data.burnRate > data.targetBurnRate ? "text-amber-500" : "text-emerald-500")}>
+          <span className={cn("text-sm font-bold", !budgetSet ? "text-foreground" : data.burnRate > data.targetBurnRate ? "text-amber-500" : "text-emerald-500")}>
             ${data.burnRate.toLocaleString()}/mo
           </span>
         </div>
-        <div className="text-xs text-muted-foreground">
-          Target: ${data.targetBurnRate.toLocaleString()}/mo • Projected runway: {data.projectedRunway}
-        </div>
-        <ProgressBar
-          value={data.burnRate}
-          max={data.targetBurnRate * 1.5}
-          color={data.burnRate > data.targetBurnRate ? "amber" : "emerald"}
-          label={`Current: $${data.burnRate.toLocaleString()}`}
-          subLabel={`Target: $${data.targetBurnRate.toLocaleString()}`}
-        />
+        {budgetSet ? (
+          <>
+            <div className="text-xs text-muted-foreground">
+              Target: ${data.targetBurnRate.toLocaleString()}/mo • Projected runway: {data.projectedRunway}
+            </div>
+            <ProgressBar
+              value={data.burnRate}
+              max={data.targetBurnRate * 1.5}
+              color={data.burnRate > data.targetBurnRate ? "amber" : "emerald"}
+              label={`Current: $${data.burnRate.toLocaleString()}`}
+              subLabel={`Target: $${data.targetBurnRate.toLocaleString()}`}
+            />
+          </>
+        ) : (
+          <div className="text-xs text-muted-foreground">No budget set — target and runway unavailable.</div>
+        )}
       </div>
 
       {/* Monthly spend chart */}
@@ -65,6 +80,9 @@ export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
         <h4 className="text-sm font-semibold flex items-center gap-1.5">
           <DollarSign className="h-4 w-4 text-muted-foreground" /> Monthly Spending
         </h4>
+        {!hasSpendHistory ? (
+          <p className="text-xs text-muted-foreground">Not enough data — no approved expenses in the last six months.</p>
+        ) : (
         <div className="flex items-end gap-2 h-24">
           {data.monthlySpend.map((m) => (
             <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
@@ -72,7 +90,7 @@ export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
               <div
                 className={cn(
                   "w-full rounded-t-sm transition-all",
-                  m.value > data.targetBurnRate ? "bg-amber-500/70" : "bg-primary/70"
+                  budgetSet && m.value > data.targetBurnRate ? "bg-amber-500/70" : "bg-primary/70"
                 )}
                 style={{ height: `${(m.value / maxMonthly) * 64}px` }}
               />
@@ -80,13 +98,31 @@ export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Category breakdown */}
       <div className="space-y-2">
         <h4 className="text-sm font-semibold">Spending by Category</h4>
+        {data.categories.length === 0 && <p className="text-xs text-muted-foreground">No approved spending yet.</p>}
         {data.categories.map((c) => {
-          const pct = c.allocated > 0 ? Math.round((c.spent / c.allocated) * 100) : 0;
+          const allocated = c.allocated;
+          if (allocated == null || allocated <= 0) {
+            // No per-category allocation is stored — show actual spend and share only.
+            const share = c.shareOfSpend ?? 0;
+            return (
+              <div key={c.name} className="space-y-1 p-2.5 rounded-lg bg-muted/30 border border-border/50">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{c.name}</span>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    ${c.spent.toLocaleString()} ({share}% of spend)
+                  </span>
+                </div>
+                <ProgressBar value={share} max={100} color="pink" />
+              </div>
+            );
+          }
+          const pct = Math.round((c.spent / allocated) * 100);
           return (
             <div key={c.name} className="space-y-1 p-2.5 rounded-lg bg-muted/30 border border-border/50">
               <div className="flex items-center justify-between">
@@ -95,12 +131,12 @@ export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
                   <span className="text-sm font-medium">{c.name}</span>
                 </div>
                 <span className={cn("text-xs font-mono", statusColor[c.status])}>
-                  ${c.spent.toLocaleString()} / ${c.allocated.toLocaleString()} ({pct}%)
+                  ${c.spent.toLocaleString()} / ${allocated.toLocaleString()} ({pct}%)
                 </span>
               </div>
               <ProgressBar
                 value={c.spent}
-                max={c.allocated}
+                max={allocated}
                 color={c.status === "good" ? "emerald" : c.status === "warning" ? "amber" : "destructive"}
               />
             </div>
@@ -113,6 +149,7 @@ export function BudgetPanel({ data }: { data: BudgetInsight | null }) {
         <h4 className="text-sm font-semibold flex items-center gap-1.5">
           <Receipt className="h-4 w-4 text-muted-foreground" /> Top Expenses
         </h4>
+        {data.biggestExpenses.length === 0 && <p className="text-xs text-muted-foreground">No approved expenses yet.</p>}
         {data.biggestExpenses.map((e, i) => (
           <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border/50">
             <div>

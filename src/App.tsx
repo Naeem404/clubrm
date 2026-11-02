@@ -1,23 +1,23 @@
 import React, { Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
+import { useRole } from "@/context/role-context";
 import { AuthPage } from "@/components/auth/auth-page";
 import { OnboardingPage } from "@/components/auth/onboarding-page";
 import { isOnboardingComplete } from "@/lib/onboarding-logic";
+import { canAccess } from "@/lib/permissions";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/sidebar";
 import { TopBar } from "@/components/layout/topbar";
 
-// Context Providers
-import { EventsProvider } from './context/events-context.tsx'
-import { TasksProvider } from './context/tasks-context.tsx'
-import { FinanceProvider } from './context/finance-context.tsx'
-import { MembersProvider } from './context/members-context.tsx'
-import { SponsorsProvider } from './context/sponsors-context.tsx' // Added this
+// Data providers (mounted only for authenticated users, keyed by user id so
+// all cached data is discarded when the signed-in user changes)
+import { EventsProvider } from "./context/events-context.tsx";
+import { TasksProvider } from "./context/tasks-context.tsx";
+import { FinanceProvider } from "./context/finance-context.tsx";
+import { MembersProvider } from "./context/members-context.tsx";
+import { SponsorsProvider } from "./context/sponsors-context.tsx";
 
-// Variants & Testing
-import { PresidentDashboard } from "@/components/dashboard/variants/president-dashboard";
-import TestDatabase from './Testing/TestDatabase';
 import { ProfilePage } from "@/components/profile/profile-page";
 
 /**
@@ -25,11 +25,11 @@ import { ProfilePage } from "@/components/profile/profile-page";
  * This prevents the "Component is not defined" errors during lazy loading.
  */
 const lazyLoad = (importFn: () => Promise<any>, name?: string) => {
-  return React.lazy(() => 
+  return React.lazy(() =>
     importFn().then((module) => {
       if (name && module[name]) return { default: module[name] };
       if (module.default) return { default: module.default };
-      const firstExport = Object.values(module).find((val) => typeof val === 'function');
+      const firstExport = Object.values(module).find((val) => typeof val === "function");
       if (firstExport) return { default: firstExport as React.ComponentType<any> };
       throw new Error(`Could not find component in module`);
     })
@@ -58,6 +58,21 @@ function PageLoader() {
 }
 
 /**
+ * Route-level authorization guard. Redirects to the dashboard when the current
+ * role is not allowed to open the route (see src/lib/permissions.ts).
+ * NOTE: this is UX only; data access is enforced by Supabase RLS.
+ */
+function RequireRole({ route, children }: { route?: string; children: React.ReactNode }) {
+  const { role } = useRole();
+  const location = useLocation();
+  const target = route ?? location.pathname;
+  if (!canAccess(role, target)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
+/**
  * Main Layout wrapper providing Sidebar and Topbar
  */
 function Layout({ children }: { children: React.ReactNode }) {
@@ -78,9 +93,13 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+const guarded = (route: string, element: React.ReactNode) => (
+  <RequireRole route={route}>{element}</RequireRole>
+);
+
 function App() {
   const { user, profile, loading, profileLoading } = useAuth();
-  const onboardingComplete = isOnboardingComplete(profile)
+  const onboardingComplete = isOnboardingComplete(profile);
 
   // 1. Handle Initial Bootup Loading
   if (loading || (user && profileLoading)) {
@@ -104,37 +123,36 @@ function App() {
   // 3. Authenticated Application
   return (
     <MembersProvider key={user.id}>
-      <EventsProvider>
-        <TasksProvider>
-          <FinanceProvider>
-            <SponsorsProvider>
+      <SponsorsProvider>
+        <EventsProvider>
+          <TasksProvider>
+            <FinanceProvider>
               <Layout>
                 <Routes>
-                  {/* Default Route uses PresidentDashboard from shivam branch */}
-                  <Route path="/" element={<PresidentDashboard />} />
-                  
+                  {/* Role-appropriate dashboard (DashboardPage switches on role) */}
+                  <Route path="/" element={<DashboardPage />} />
                   <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/members" element={<MembersPage />} />
-                  <Route path="/tasks" element={<TasksPage />} />
-                  <Route path="/events" element={<EventsPage />} />
-                  <Route path="/finance" element={<FinancePage />} />
-                  <Route path="/external" element={<ExternalPage />} />
-                  <Route path="/contacts" element={<ContactsPage />} />
-                  <Route path="/marketing" element={<MarketingPage />} />
-                  <Route path="/documents" element={<DocumentsPage />} />
-                  <Route path="/reports" element={<ReportsPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/profile" element={<ProfilePage />} />
-                  <Route path="/test-db" element={<TestDatabase />} />
-                  
+
+                  <Route path="/members" element={guarded("/members", <MembersPage />)} />
+                  <Route path="/tasks" element={guarded("/tasks", <TasksPage />)} />
+                  <Route path="/events" element={guarded("/events", <EventsPage />)} />
+                  <Route path="/finance" element={guarded("/finance", <FinancePage />)} />
+                  <Route path="/external" element={guarded("/external", <ExternalPage />)} />
+                  <Route path="/contacts" element={guarded("/contacts", <ContactsPage />)} />
+                  <Route path="/marketing" element={guarded("/marketing", <MarketingPage />)} />
+                  <Route path="/documents" element={guarded("/documents", <DocumentsPage />)} />
+                  <Route path="/reports" element={guarded("/reports", <ReportsPage />)} />
+                  <Route path="/settings" element={guarded("/settings", <SettingsPage />)} />
+                  <Route path="/profile" element={guarded("/profile", <ProfilePage />)} />
+
                   {/* Fallback for unknown routes */}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>
-            </SponsorsProvider>
-          </FinanceProvider>
-        </TasksProvider>
-      </EventsProvider>
+            </FinanceProvider>
+          </TasksProvider>
+        </EventsProvider>
+      </SponsorsProvider>
     </MembersProvider>
   );
 }

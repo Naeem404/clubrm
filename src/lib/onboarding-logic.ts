@@ -16,6 +16,10 @@ export function canSelfSelectOnboardingRole(role: Role) {
   return SELF_SELECTABLE_ONBOARDING_ROLES.includes(role)
 }
 
+/**
+ * @deprecated Roles can no longer be self-selected during onboarding (real RBAC).
+ * Kept for backwards compatibility with existing tests; use validateOnboardingProfile.
+ */
 export function validateOnboardingSubmission(input: {
   fullName: string
   role: Role | null
@@ -34,6 +38,21 @@ export function validateOnboardingSubmission(input: {
     return "This role must be assigned by the organization."
   }
 
+  return null
+}
+
+export const MAX_FULL_NAME_LENGTH = 100
+
+/**
+ * Validates the self-service part of onboarding. Roles are NOT self-assigned:
+ * they are granted by a President / Administrator via the `set_member_role` RPC.
+ */
+export function validateOnboardingProfile(input: { fullName: string }) {
+  const fullName = input.fullName.trim()
+  if (!fullName) return "Please enter your name."
+  if (fullName.length > MAX_FULL_NAME_LENGTH) {
+    return `Name must be ${MAX_FULL_NAME_LENGTH} characters or fewer.`
+  }
   return null
 }
 

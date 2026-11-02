@@ -726,7 +726,32 @@ export interface Database {
       }
     }
     Views: {}
-    Functions: {}
+    Functions: {
+      current_user_role: {
+        Args: Record<PropertyKey, never>
+        Returns: string | null
+      }
+      set_member_role: {
+        Args: { target_user: string; new_role: string }
+        Returns: Database["public"]["Tables"]["profiles"]["Row"]
+      }
+      has_role: {
+        Args: { roles: string[] }
+        Returns: boolean
+      }
+      has_permission: {
+        Args: { perm: string }
+        Returns: boolean
+      }
+      is_admin: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      is_exec: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+    }
     Enums: {}
   }
 }

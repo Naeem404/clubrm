@@ -1,64 +1,49 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/context/auth-context"
-import type { Role } from "@/context/role-context"
+import { useRole } from "@/context/role-context"
 import { ArrowRight, BadgeCheck, Loader2, Lock, ShieldCheck, Sparkles, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
+  MAX_FULL_NAME_LENGTH,
   RESERVED_ONBOARDING_ROLES,
-  SELF_SELECTABLE_ONBOARDING_ROLES,
-  validateOnboardingSubmission,
+  validateOnboardingProfile,
 } from "@/lib/onboarding-logic"
 
-const ROLE_OPTIONS = [
-  { value: "VP Internal", description: "Operations, admin flow, and internal coordination." },
-  { value: "VP Finance", description: "Budgets, approvals, and expense tracking." },
-  { value: "VP Events", description: "Event planning, scheduling, and delivery." },
-  { value: "VP External", description: "Partnerships, outreach, and external relations." },
-  { value: "Marketing", description: "Campaigns, promotion, and brand communication." },
-  { value: "Executive", description: "General team execution across the club." },
-] satisfies { value: Role; description: string }[]
+function friendlyOnboardingError(err: unknown): string {
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : ""
+  if (/network|fetch/i.test(message)) return "Network error. Check your connection and try again."
+  if (/permission|policy|denied|rls/i.test(message)) return "You don't have permission to update this profile."
+  return "We couldn't save your details. Please try again."
+}
 
 export function OnboardingPage() {
   const { user, profile, completeOnboarding } = useAuth()
+  const { role } = useRole()
   const [step, setStep] = useState<"welcome" | "details">("welcome")
-  const [fullName, setFullName] = useState(
-    profile?.full_name || user?.user_metadata?.full_name || user?.email?.split("@")[0] || ""
+  const [fullName, setFullName] = useState<string>(
+    profile?.full_name || user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split("@")[0] || ""
   )
-  const [selectedRole, setSelectedRole] = useState<Role | null>((profile?.role as Role | undefined) ?? null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const selectedRoleMeta = useMemo(
-    () => ROLE_OPTIONS.find((option) => option.value === selectedRole) ?? null,
-    [selectedRole]
-  )
-
   async function handleContinue() {
-    const validationError = validateOnboardingSubmission({
-      fullName,
-      role: selectedRole,
-    })
-
+    const validationError = validateOnboardingProfile({ fullName })
     if (validationError) {
       setError(validationError)
       return
     }
 
-    const role = selectedRole as Role
-
     setError(null)
     setSaving(true)
-    const result = await completeOnboarding({
-      fullName: fullName.trim(),
-      role,
-    })
-    setSaving(false)
-
-    if (result.error) {
-      setError(result.error)
+    try {
+      await completeOnboarding({ full_name: fullName.trim() })
+    } catch (err) {
+      setError(friendlyOnboardingError(err))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -122,7 +107,7 @@ export function OnboardingPage() {
                     <p className="text-sm font-medium uppercase tracking-[0.22em] text-primary">Step 1</p>
                     <h2 className="text-3xl font-bold tracking-tight">Welcome.</h2>
                     <p className="max-w-md text-sm leading-6 text-muted-foreground">
-                      Before you jump into the project, tell us who you are and what role you play in the club.
+                      Before you jump into the project, tell us who you are.
                     </p>
                   </div>
 
@@ -142,7 +127,7 @@ export function OnboardingPage() {
                     <p className="text-sm font-medium uppercase tracking-[0.22em] text-primary">Step 2</p>
                     <h2 className="text-3xl font-bold tracking-tight">Tell us about you.</h2>
                     <p className="max-w-md text-sm leading-6 text-muted-foreground">
-                      This helps ClubRM personalize your workspace and save your role for the next time you sign in.
+                      This helps ClubRM personalize your workspace. Your role determines which modules you can access.
                     </p>
                   </div>
 
@@ -153,47 +138,29 @@ export function OnboardingPage() {
                       value={fullName}
                       onChange={(event) => setFullName(event.target.value)}
                       placeholder="Your full name"
+                      maxLength={MAX_FULL_NAME_LENGTH}
+                      autoComplete="name"
                       className="h-11 rounded-xl"
                     />
                   </div>
 
                   <div className="space-y-3">
                     <Label>Role</Label>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {ROLE_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setSelectedRole(option.value)}
-                          className={cn(
-                            "rounded-2xl border p-4 text-left transition-all duration-200",
-                            selectedRole === option.value
-                              ? "border-primary bg-primary/10 shadow-lg shadow-primary/10"
-                              : "border-border/60 bg-background/55 hover:border-primary/40 hover:bg-background"
-                          )}
-                        >
-                          <p className="text-sm font-semibold">{option.value}</p>
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</p>
-                        </button>
-                      ))}
+                    <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-primary">
+                      <span className="text-primary/80">Your current role: </span>
+                      <span className="font-semibold">{role}</span>
                     </div>
                     <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
                       <div className="flex items-center gap-2 font-semibold text-amber-700 dark:text-amber-300">
                         <Lock className="h-4 w-4" />
-                        Reserved roles
+                        Roles are assigned by your organization
                       </div>
                       <p className="mt-2 text-xs leading-5 text-amber-700/90 dark:text-amber-100/80">
-                        {RESERVED_ONBOARDING_ROLES.join(" and ")} are assigned by the organization and cannot be self-selected during onboarding.
+                        Only the {RESERVED_ONBOARDING_ROLES.join(" or ")} can change member roles. Ask them to update
+                        yours from Settings &rarr; Access Management if it isn't correct.
                       </p>
                     </div>
                   </div>
-
-                  {selectedRoleMeta && (
-                    <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-primary">
-                      <span className="font-semibold">{selectedRoleMeta.value}</span>
-                      <span className="text-primary/80"> selected. {selectedRoleMeta.description}</span>
-                    </div>
-                  )}
 
                   {error && (
                     <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">

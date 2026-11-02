@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Users, Loader2, Eye, EyeOff } from "lucide-react"
+import { MIN_PASSWORD_LENGTH, friendlyAuthError, validateAuthInput } from "@/lib/auth-validation"
 
 export function AuthPage() {
   const { signIn, signUp } = useAuth()
@@ -18,26 +19,28 @@ export function AuthPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (loading) return
     setError(null)
-    setLoading(true)
 
-    if (mode === "login") {
-      const { error } = await signIn(email, password)
-      if (error) setError(error)
-    } else {
-      if (!fullName.trim()) {
-        setError("Please enter your full name")
-        setLoading(false)
-        return
-      }
-      const { error } = await signUp(email, password, fullName.trim())
-      if (error) {
-        setError(error)
+    const validationError = validateAuthInput({ mode, email, password, fullName })
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+
+    setLoading(true)
+    try {
+      if (mode === "login") {
+        await signIn(email.trim(), password)
       } else {
+        await signUp(email.trim(), password, fullName.trim())
         setSignupSuccess(true)
       }
+    } catch (err) {
+      setError(friendlyAuthError(err, mode))
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   function switchMode() {
@@ -86,7 +89,7 @@ export function AuthPage() {
 
         {/* Form Card */}
         <div className="bg-card text-card-foreground border border-border/50 rounded-xl p-6 space-y-6 shadow-lg shadow-black/5">
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             {mode === "signup" && (
               <div className="space-y-2">
                 <Label htmlFor="fullName">Full Name</Label>
@@ -128,7 +131,7 @@ export function AuthPage() {
                   className="bg-background/80 pr-11"
                   required
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  minLength={6}
+                  minLength={mode === "signup" ? MIN_PASSWORD_LENGTH : undefined}
                 />
                 <Button
                   type="button"

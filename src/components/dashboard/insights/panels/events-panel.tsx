@@ -19,8 +19,8 @@ export function EventsPanel({ data }: { data: EventsInsight | null }) {
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Upcoming Events", value: data.totalUpcoming, icon: <Calendar className="h-4 w-4" /> },
-          { label: "Avg Registration", value: `${data.avgRegistrationRate}%`, icon: <Users className="h-4 w-4 text-primary" /> },
-          { label: "Volunteer Coverage", value: `${data.volunteerCoverageRate}%`, icon: <Users className="h-4 w-4 text-emerald-500" /> },
+          { label: "Avg Registration", value: data.avgRegistrationRate != null ? `${data.avgRegistrationRate}%` : "—", icon: <Users className="h-4 w-4 text-primary" /> },
+          { label: "Volunteer Coverage", value: data.volunteerCoverageRate != null ? `${data.volunteerCoverageRate}%` : "Not tracked", icon: <Users className="h-4 w-4 text-emerald-500" /> },
         ].map((s) => (
           <div key={s.label} className="p-3 rounded-lg bg-muted/30 border border-border/50 text-center">
             <div className="flex justify-center mb-1">{s.icon}</div>
@@ -35,6 +35,9 @@ export function EventsPanel({ data }: { data: EventsInsight | null }) {
         <h4 className="text-sm font-semibold flex items-center gap-1.5">
           <TrendingUp className="h-4 w-4 text-muted-foreground" /> Registration Rate Trend
         </h4>
+        {data.trend.length < 2 ? (
+          <p className="text-xs text-muted-foreground">Not enough data — needs events with a capacity in at least two of the last six months.</p>
+        ) : (
         <div className="flex items-end gap-2 h-16">
           {data.trend.map((pt) => (
             <div key={pt.label} className="flex-1 flex flex-col items-center gap-1">
@@ -50,17 +53,20 @@ export function EventsPanel({ data }: { data: EventsInsight | null }) {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Per-event detail cards */}
       <div className="space-y-3">
         <h4 className="text-sm font-semibold">Event Breakdown</h4>
-        {data.events.map((ev) => {
+        {data.events.length === 0 && <p className="text-xs text-muted-foreground">No upcoming events.</p>}
+        {data.events.map((ev, idx) => {
           const style = statusStyles[ev.status];
           const regPct = ev.capacity > 0 ? Math.round((ev.registered / ev.capacity) * 100) : 0;
-          const volPct = ev.volunteersNeeded > 0 ? Math.round((ev.volunteersFilled / ev.volunteersNeeded) * 100) : 100;
+          const volTracked = ev.volunteersNeeded > 0;
+          const volPct = volTracked ? Math.round((ev.volunteersFilled / ev.volunteersNeeded) * 100) : 0;
           return (
-            <div key={ev.title} className={cn("p-3 rounded-lg border space-y-3", style.bg)}>
+            <div key={`${idx}-${ev.title}`} className={cn("p-3 rounded-lg border space-y-3", style.bg)}>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-medium">{ev.title}</div>
@@ -74,23 +80,31 @@ export function EventsPanel({ data }: { data: EventsInsight | null }) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">Registration</div>
-                  <ProgressBar
-                    value={ev.registered}
-                    max={ev.capacity}
-                    label={`${ev.registered}/${ev.capacity}`}
-                    subLabel={`${regPct}%`}
-                    color={regPct >= 70 ? "emerald" : regPct >= 50 ? "amber" : "destructive"}
-                  />
+                  {ev.capacity > 0 ? (
+                    <ProgressBar
+                      value={ev.registered}
+                      max={ev.capacity}
+                      label={`${ev.registered}/${ev.capacity}`}
+                      subLabel={`${regPct}%`}
+                      color={regPct >= 70 ? "emerald" : regPct >= 50 ? "amber" : "destructive"}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{ev.registered} registered • no capacity set</p>
+                  )}
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">Volunteers</div>
-                  <ProgressBar
-                    value={ev.volunteersFilled}
-                    max={ev.volunteersNeeded}
-                    label={`${ev.volunteersFilled}/${ev.volunteersNeeded}`}
-                    subLabel={`${volPct}%`}
-                    color={volPct >= 100 ? "emerald" : volPct >= 50 ? "amber" : "destructive"}
-                  />
+                  {volTracked ? (
+                    <ProgressBar
+                      value={ev.volunteersFilled}
+                      max={ev.volunteersNeeded}
+                      label={`${ev.volunteersFilled}/${ev.volunteersNeeded}`}
+                      subLabel={`${volPct}%`}
+                      color={volPct >= 100 ? "emerald" : volPct >= 50 ? "amber" : "destructive"}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Not tracked</p>
+                  )}
                 </div>
               </div>
 

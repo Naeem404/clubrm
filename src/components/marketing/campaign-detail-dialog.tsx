@@ -1,4 +1,6 @@
 import { formatNumber } from "./types"
+import { Button } from "@/components/ui/button"
+import { Pencil, Trash2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -15,9 +17,12 @@ interface CampaignDetailDialogProps {
     reach?: number
     engagement?: number
   } | null
+  /** Omit to hide (e.g. user lacks marketing.write). */
+  onEdit?: () => void
+  onDelete?: () => void
 }
 
-export function CampaignDetailDialog({ open, onOpenChange, campaign }: CampaignDetailDialogProps) {
+export function CampaignDetailDialog({ open, onOpenChange, campaign, onEdit, onDelete }: CampaignDetailDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md rounded-3xl">
@@ -36,6 +41,20 @@ export function CampaignDetailDialog({ open, onOpenChange, campaign }: CampaignD
               <p className="text-2xl font-black mt-1 text-primary">{formatNumber(campaign?.engagement || 0)}</p>
             </div>
           </div>
+          {(onEdit || onDelete) && (
+            <div className="flex justify-end gap-2 pt-2">
+              {onEdit && (
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={onEdit}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Button>
+              )}
+              {onDelete && (
+                <Button variant="destructive" size="sm" className="gap-1.5" onClick={onDelete}>
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

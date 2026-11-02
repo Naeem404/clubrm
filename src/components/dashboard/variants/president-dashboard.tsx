@@ -26,27 +26,14 @@ import { ApprovalQueueWidget } from "../widgets/approval-queue-widget";
 import { RiskAlertsWidget } from "../widgets/risk-alerts-widget";
 import { PRESIDENT_WIDGET_TITLES, PRESIDENT_DEFAULT_WIDGETS } from "../widget-config";
 
-// Full API response type shape
-interface DashboardAPIResponse {
-  stats: {
-    members: number;
-    activeMembers: number;
-    totalBudget: number;
-    spentBudget: number;
-    onTrackEvents: number;
-    totalEvents: number;
-    completedTasks: number;
-    totalTasks: number;
-  };
-  score: number;
-  insights: {
-    orgHealth: any;
-    members: any;
-    budget: any;
-    events: any;
-    risks: any;
-    approvals: any;
-  };
+import type { DashboardInsightsResult } from "@/lib/dashboard-logic";
+
+// Full API response type shape — produced by the same buildDashboardInsights() used client-side.
+type DashboardAPIResponse = DashboardInsightsResult;
+
+function isDashboardResponse(v: unknown): v is DashboardAPIResponse {
+  const o = v as Partial<DashboardAPIResponse> | null;
+  return !!o && typeof o === "object" && !!o.stats && !!o.insights && typeof o.score === "number";
 }
 
 export function PresidentDashboard() {
@@ -64,24 +51,35 @@ function PresidentDashboardContent() {
   const { session } = useAuth();
   const { isCustomizing, layout, visibleWidgets } = useDashboardLayout();
 
+  const accessToken = session?.access_token;
   useEffect(() => {
+    // The endpoint requires auth; without a token rely on live client insights.
+    if (!accessToken) {
+      setApiData(null);
+      return;
+    }
+    const controller = new AbortController();
     async function fetchStats() {
       try {
-        const headers: Record<string, string> = {};
-        if (session?.access_token) {
-          headers["Authorization"] = `Bearer ${session.access_token}`;
-        }
-        const res = await fetch("/api/dashboard/stats", { headers });
-        const data = await res.json();
+        const res = await fetch("/api/dashboard/stats", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`Stats request failed (${res.status})`);
+        const data: unknown = await res.json();
+        if (!isDashboardResponse(data)) throw new Error("Unexpected stats response shape");
         setApiData(data);
       } catch (err) {
+        if (controller.signal.aborted) return;
+        setApiData(null);
         logError("Failed to fetch stats", 'PresidentDashboard', err);
       }
     }
     fetchStats();
-  }, [session?.access_token]);
+    return () => controller.abort();
+  }, [accessToken]);
 
-  const { expenses, reimbursements, budget, totalSpent, totalPending, updateExpenseStatus, updateReimbursementStatus } = useFinance();
+  const { expenses, reimbursements, totalPending, updateExpenseStatus, updateReimbursementStatus } = useFinance();
   const { events, updateEvent } = useEvents();
   const { tasks, moveTask } = useTasks();
 
@@ -133,13 +131,10 @@ function PresidentDashboardContent() {
     }
   };
 
-  const remaining = apiData
-    ? apiData.stats.totalBudget - apiData.stats.spentBudget
-    : budget.totalBudget - totalSpent;
-  const remainingPct = apiData
-    ? apiData.stats.totalBudget > 0 ? Math.round((remaining / apiData.stats.totalBudget) * 100) : 0
-    : budget.totalBudget > 0 ? Math.round((remaining / budget.totalBudget) * 100) : 0;
-  const displaySpent = apiData ? apiData.stats.spentBudget : totalSpent;
+  // Prefer server data when available; otherwise the identical client-side computation.
+  const healthScore = apiData?.score ?? liveInsights.score;
+  const previousScore = (apiData?.insights.orgHealth ?? liveInsights.orgHealth).previousScore;
+  const budgetInsight = apiData?.insights.budget ?? liveInsights.budget;
 
   const upcomingEvents = useMemo(() => {
     const now = new Date();
@@ -151,8 +146,9 @@ function PresidentDashboardContent() {
 
   const risks = useMemo(() => {
     if (apiData?.insights?.risks?.risks && apiData.insights.risks.risks.length > 0) {
-      return apiData.insights.risks.risks.slice(0, 3).map((r: any) => ({
-        id: r.id || `api-${Math.random()}`,
+      return apiData.insights.risks.risks.slice(0, 3).map((r, i) => ({
+        // Risks have no DB id; index + title is stable across renders.
+        id: `api-${i}-${r.title}`,
         title: r.title,
         sub: r.description,
         severity: r.severity === "high" ? "High" : r.severity === "medium" ? "Medium" : "Low",
@@ -214,8 +210,9 @@ function PresidentDashboardContent() {
           >
             <StatCard
               title="Org Health Score"
-              value={`${apiData?.score ?? liveInsights.score}/100`}
-              trend={{ value: (apiData?.score ?? liveInsights.score) - (apiData?.insights?.orgHealth?.previousScore ?? liveInsights.orgHealth.previousScore), label: "vs last month" }}
+              value={`${healthScore}/100`}
+              trend={previousScore != null ? { value: healthScore - previousScore, label: "vs last month" } : undefined}
+              description={previousScore == null ? "No history yet" : undefined}
               icon={<Activity className="h-5 w-5" />}
             />
           </ExpandableTile>
@@ -243,18 +240,30 @@ function PresidentDashboardContent() {
             insightPanel={<BudgetPanel data={apiData?.insights?.budget ?? liveInsights.budget} />}
           >
             <Widget title="Budget Remaining">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-primary" />
-                  <span className="text-3xl font-bold">${(apiData?.stats ? remaining : liveInsights.budget.remaining).toLocaleString()}</span>
+              {budgetInsight.budgetSet ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="h-5 w-5 text-primary" />
+                    <span className="text-3xl font-bold">${budgetInsight.remaining.toLocaleString()}</span>
+                  </div>
+                  <ProgressBar
+                    value={Math.max(0, budgetInsight.percentRemaining)}
+                    label={`Total Spent: $${budgetInsight.spent.toLocaleString()}`}
+                    subLabel={`${budgetInsight.percentRemaining}% remaining`}
+                    color="pink"
+                  />
                 </div>
-                <ProgressBar
-                  value={apiData?.stats ? remainingPct : liveInsights.budget.percentRemaining}
-                  label={`Total Spent: $${(apiData?.stats ? displaySpent : liveInsights.budget.spent).toLocaleString()}`}
-                  subLabel={`${apiData?.stats ? remainingPct : liveInsights.budget.percentRemaining}% remaining`}
-                  color="pink"
-                />
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-xl font-semibold text-muted-foreground">No budget set</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Total Spent: ${budgetInsight.spent.toLocaleString()} • set a term budget in Finance to track what's left.
+                  </p>
+                </div>
+              )}
             </Widget>
           </ExpandableTile>
         );

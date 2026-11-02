@@ -1,13 +1,9 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { logError } from "@/lib/logger"
 import { useRole } from "@/context/role-context"
-import { useAuth } from "@/context/auth-context" 
-import { useTasks } from "@/context/tasks-context"
-import { useEvents } from "@/context/events-context"
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { useAuth } from "@/context/auth-context"
 import { Sparkles, Loader2, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AI_FALLBACK_BRIEFS, AI_FALLBACK_DELAY_MS } from "./fallbacks"
 
 // Dashboard Variants
 import { PresidentDashboard } from "./variants/president-dashboard"
@@ -19,59 +15,93 @@ import { VPExternalDashboard } from "./variants/vp-external-dashboard"
 import { VPFinanceDashboard } from "./variants/vp-finance-dashboard"
 import { VPInternalDashboard } from "./variants/vp-internal-dashboard"
 
+const BRIEF_PROMPT_TEXT = "Click the refresh icon to generate your executive brief."
+
+type BriefState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; summary: string }
+  | { status: "error"; message: string }
+
+/** Response contract of POST /api/brief (see api/brief.ts). */
+interface BriefResponse {
+  summary: string
+  role: string
+  generatedAt: string
+}
+
+function briefErrorMessage(status: number): string {
+  switch (status) {
+    case 401:
+      return "AI brief unavailable — please sign in again."
+    case 429:
+      return "AI brief unavailable — rate limit reached, try again in a minute."
+    default:
+      return "AI brief unavailable right now."
+  }
+}
+
 export function DashboardPage() {
   const { role } = useRole()
-  const { user } = useAuth()
-  const { tasks } = useTasks()
-  const { events } = useEvents()
-  
-  const [aiSummary, setAiSummary] = useState("Click the refresh icon to generate your executive brief.")
-  const [isGenerating, setIsGenerating] = useState(false)
+  const { session } = useAuth()
+  const accessToken = session?.access_token ?? null
 
-  const genAI = useMemo(() => {
-    const key = import.meta.env.VITE_GEMINI_API_KEY || "";
-    return new GoogleGenerativeAI(key);
-  }, []);
+  const [brief, setBrief] = useState<BriefState>({ status: "idle" })
+  const inFlight = useRef<AbortController | null>(null)
+
+  useEffect(() => () => inFlight.current?.abort(), [])
 
   const generateStrategicBrief = useCallback(async () => {
-    if (isGenerating) return;
-    
-    setIsGenerating(true)
-    setAiSummary("Consulting the Chief of Staff...")
+    if (inFlight.current) return
+    if (!accessToken) {
+      setBrief({ status: "error", message: "AI brief unavailable — please sign in." })
+      return
+    }
+
+    const controller = new AbortController()
+    inFlight.current = controller
+    setBrief({ status: "loading" })
 
     try {
-      const activeUserId = user?.id || "m1";
-      const pendingTasks = tasks
-        .filter(t => t.assignees.includes(activeUserId) && t.status !== 'done')
-        .slice(0, 5)
-        .map(t => `- ${t.title}`)
-        .join("\n");
-
-      const upcomingEvents = events
-        .filter(e => new Date(e.startDate) > new Date())
-        .slice(0, 3)
-        .map(e => `- ${e.title}`)
-        .join("\n");
-
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });      
-      const prompt = `Role: ${role}. Tasks: ${pendingTasks || "None"}. Events: ${upcomingEvents || "None"}. Provide a 2-sentence executive summary for the dashboard.`;
-
-      const result = await model.generateContent(prompt);
-      const text = result.response.text().trim();
-      setAiSummary(text);
-
-    } catch (error: any) {
-      logError("AI Error", 'DashboardPage', error);
-      console.warn("Gemini API unavailable — using fallback brief for role:", role);
-      
-      setTimeout(() => {
-        setAiSummary(AI_FALLBACK_BRIEFS[role as string] || AI_FALLBACK_BRIEFS["default"]);
-      }, AI_FALLBACK_DELAY_MS);
-
+      // The server builds the prompt from the caller's own tasks/events;
+      // only the currently viewed dashboard role is sent as a hint.
+      const res = await fetch("/api/brief", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ roleHint: role }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        setBrief({ status: "error", message: briefErrorMessage(res.status) })
+        return
+      }
+      const data = (await res.json()) as Partial<BriefResponse>
+      if (typeof data.summary !== "string" || !data.summary.trim()) {
+        setBrief({ status: "error", message: briefErrorMessage(502) })
+        return
+      }
+      setBrief({ status: "ready", summary: data.summary })
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return
+      logError("AI brief request failed", "DashboardPage", error)
+      setBrief({ status: "error", message: briefErrorMessage(0) })
     } finally {
-      setIsGenerating(false)
+      if (inFlight.current === controller) inFlight.current = null
     }
-  }, [tasks, events, user, genAI, role, isGenerating]);
+  }, [accessToken, role])
+
+  const isGenerating = brief.status === "loading"
+  const briefText =
+    brief.status === "ready"
+      ? brief.summary
+      : brief.status === "error"
+        ? brief.message
+        : brief.status === "loading"
+          ? "Generating your brief…"
+          : BRIEF_PROMPT_TEXT
 
   const renderDashboard = () => {
     switch (role) {
@@ -112,8 +142,11 @@ export function DashboardPage() {
               <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 mb-1">
                 Strategic Brief
               </h3>
-              <p className="text-sm text-zinc-300 leading-relaxed max-w-4xl">
-                {aiSummary}
+              <p
+                className={`text-sm leading-relaxed max-w-4xl ${brief.status === "error" ? "text-zinc-500 italic" : "text-zinc-300"}`}
+                aria-live="polite"
+              >
+                {briefText}
               </p>
             </div>
           </div>
@@ -122,6 +155,7 @@ export function DashboardPage() {
             size="sm"
             onClick={generateStrategicBrief}
             disabled={isGenerating}
+            aria-label="Generate strategic brief"
             className="h-8 w-8 p-0 hover:bg-zinc-800 text-zinc-500 transition-colors"
           >
             <RotateCw className={`h-3 w-3 ${isGenerating ? 'animate-spin' : ''}`} />

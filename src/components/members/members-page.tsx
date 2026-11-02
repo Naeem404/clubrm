@@ -11,6 +11,9 @@ import { AddMemberDialog } from "./add-member-dialog"
 import { EditMemberDialog } from "./edit-member-dialog"
 import { MemberDetailDialog } from "./member-detail-dialog"
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useRole } from "@/context/role-context"
+import { hasPermission } from "@/lib/permissions"
+import { objectsToCsv, downloadCsv } from "@/lib/csv"
 
 const ALL_ROLES = [
   "President",
@@ -25,6 +28,10 @@ const ALL_ROLES = [
 
 export function MembersPage() {
   const { members, addMember, updateMember, deleteMember, stats } = useMembers()
+  const { role } = useRole()
+  // UI gating only — RLS on `members` is the real enforcement.
+  const canWrite = hasPermission(role, "members.write")
+  const canRemove = hasPermission(role, "members.remove")
 
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -48,12 +55,37 @@ export function MembersPage() {
   }, [members, search, statusFilter, roleFilter])
 
   function handleAdd(member: Member) {
+    if (!canWrite) return
     addMember(member)
   }
 
   function handleEdit(member: Member) {
+    if (!canWrite) return
     updateMember(member)
     setEditMember(null)
+  }
+
+  function handleDelete(id: string) {
+    if (!canRemove) return
+    const target = members.find((m) => m.id === id)
+    if (!window.confirm(`Remove ${target?.name ?? "this member"} from the roster?`)) return
+    deleteMember(id)
+  }
+
+  function handleExportCsv() {
+    const csv = objectsToCsv(filtered, [
+      { header: "Name", value: (m) => m.name },
+      { header: "Email", value: (m) => m.email },
+      { header: "Phone", value: (m) => m.phone },
+      { header: "Role", value: (m) => m.role },
+      { header: "Status", value: (m) => m.status },
+      { header: "Department", value: (m) => m.department },
+      { header: "Year", value: (m) => m.year },
+      { header: "Join Date", value: (m) => m.joinDate },
+      { header: "Tasks Completed", value: (m) => m.tasksCompleted },
+      { header: "Events Attended", value: (m) => m.eventsAttended },
+    ])
+    downloadCsv(`members-${new Date().toISOString().split("T")[0]}.csv`, csv)
   }
 
   return (
@@ -66,10 +98,12 @@ export function MembersPage() {
             Manage your club's roster, roles, and member information
           </p>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-2">
-          <UserPlus className="h-4 w-4" />
-          Add Member
-        </Button>
+        {canWrite && (
+          <Button onClick={() => setAddOpen(true)} className="gap-2">
+            <UserPlus className="h-4 w-4" />
+            Add Member
+          </Button>
+        )}
       </div>
 
       {/* Stat Cards */}
@@ -91,6 +125,8 @@ export function MembersPage() {
         view={view}
         onViewChange={setView}
         roles={ALL_ROLES as string[]}
+        onExportCsv={handleExportCsv}
+        exportDisabled={filtered.length === 0}
       />
 
       <p className="text-xs text-muted-foreground">
@@ -105,8 +141,8 @@ export function MembersPage() {
               key={member.id}
               member={member}
               onView={setDetailMember}
-              onEdit={setEditMember}
-              onDelete={deleteMember}
+              onEdit={canWrite ? setEditMember : undefined}
+              onDelete={canRemove ? handleDelete : undefined}
             />
           ))}
         </div>
@@ -132,8 +168,8 @@ export function MembersPage() {
                   key={member.id}
                   member={member}
                   onView={setDetailMember}
-                  onEdit={setEditMember}
-                  onDelete={deleteMember}
+                  onEdit={canWrite ? setEditMember : undefined}
+                  onDelete={canRemove ? handleDelete : undefined}
                 />
               ))}
             </TableBody>
@@ -143,12 +179,12 @@ export function MembersPage() {
 
       {/* Dialogs */}
       <AddMemberDialog
-        open={addOpen}
+        open={addOpen && canWrite}
         onOpenChange={setAddOpen}
         onAdd={handleAdd}
       />
       <EditMemberDialog
-        open={!!editMember}
+        open={!!editMember && canWrite}
         onOpenChange={(open) => !open && setEditMember(null)}
         member={editMember}
         onUpdate={handleEdit}

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from "react"
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { logError } from "@/lib/logger"
 import {
   type Expense,
@@ -10,41 +10,42 @@ import {
 } from "@/components/finance/types"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "./auth-context"
+import { useToast } from "./toast-context"
 
-const today = new Date()
-const y = today.getFullYear()
-const m = today.getMonth()
+/*
+ * Single-club data layer: every authenticated user reads the shared club rows;
+ * access is enforced by RLS (see supabase/migration-security-hardening.sql).
+ * owner_id is set by the database. New expenses/reimbursements are always
+ * inserted as 'pending'; approval changes are restricted server-side to
+ * VP Finance / President / Administrator.
+ */
 
-function d(day: number, month?: number): Date {
-  return new Date(y, month !== undefined ? month : m, day)
+const EMPTY_BUDGET: Budget = { totalBudget: 0, termLabel: "" }
+
+function errorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string") {
+    return (err as { message: string }).message
+  }
+  return typeof err === "string" ? err : "Unknown error"
 }
 
-const SEED_BUDGET: Budget = {
-  totalBudget: 18000,
-  termLabel: "Fall 2026",
+/** Toast helper that degrades to a no-op when no ToastProvider is mounted. */
+function useErrorToast() {
+  let showToast: ReturnType<typeof useToast>["showToast"] | null = null
+  try {
+    showToast = useToast().showToast
+  } catch {
+    showToast = null
+  }
+  return useCallback(
+    (title: string, message?: string) => showToast?.({ type: "error", title, message }),
+    [showToast]
+  )
 }
 
-export const SEED_EXPENSES: Expense[] = [
-  { id: "e1f1a2b3-c4d5-4e6f-8a9b-0c1d2e3f4a5b", description: "Venue deposit - Main Hall", amount: 250, category: "events", date: d(5), status: "approved", submittedBy: "Sarah Smith", approvedBy: "Emily Chen" },
-  { id: "d2e3f4a5-b6c7-4d8e-9f0a-1b2c3d4e5f6g", description: "Marketing flyers (200 copies)", amount: 89, category: "marketing", date: d(3), status: "pending", submittedBy: "Lisa Wang" },
-  { id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", description: "Snacks for exec meeting", amount: 45, category: "food", date: d(1), status: "approved", submittedBy: "Mike Johnson", approvedBy: "Emily Chen" },
-  { id: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e", description: "Photography for Tech Talk", amount: 150, category: "events", date: d(8), status: "approved", submittedBy: "Sarah Smith", approvedBy: "Emily Chen" },
-  { id: "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f", description: "Domain renewal - clubrm.org", amount: 35, category: "technology", date: d(2), status: "approved", submittedBy: "Tom Davis", approvedBy: "Emily Chen" },
-  { id: "d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7g", description: "Banner & signage for Valentine Social", amount: 120, category: "marketing", date: d(6), status: "approved", submittedBy: "Lisa Wang", approvedBy: "Emily Chen" },
-]
+const isoDate = (d?: Date | string | null) =>
+  (d ? new Date(d) : new Date()).toISOString().split("T")[0]
 
-export const SEED_REIMBURSEMENTS: Reimbursement[] = [
-  { id: "e4f5a6b7-c8d9-4e0f-1a2b-3c4d5e6f7g8h", submittedBy: "John Doe", amount: 145, description: "Food for networking event", category: "food", date: d(5), status: "pending" },
-  { id: "f5a6b7c8-d9e0-4f1a-2b3c-4d5e6f7g8h9i", submittedBy: "Sarah Smith", amount: 89, description: "Office supplies", category: "operations", date: d(4), status: "pending" },
-  { id: "g6h7i8j9-k0l1-4m2n-3o4p-5q6r7s8t9u0v", submittedBy: "Alex Brown", amount: 35, description: "Uber to sponsor meeting", category: "operations", date: d(6), status: "pending" },
-]
-
-export const SEED_INCOME: Income[] = [
-  { id: "h7i8j9k0-l1m2-4n3o-4p5q-6r7s8t9u0v1w", source: "Member Dues - Fall Term (42 members)", amount: 4200, type: "dues", date: d(1, m - 2), recurring: true },
-  { id: "i8j9k0l1-m2n3-4o4p-5q6r-7s8t9u0v1w2x", source: "TechCorp Sponsorship - Gold Tier", amount: 5000, type: "sponsorship", date: d(15, m - 1) },
-]
-
-// Rows
 function toExpense(row: Record<string, unknown>): Expense {
   return {
     id: row.id as string,
@@ -59,15 +60,17 @@ function toExpense(row: Record<string, unknown>): Expense {
     notes: (row.notes as string) || undefined,
   }
 }
-function expenseToRow(e: Expense) {
+
+/** Insert payload: status/approval are never client-controlled on create. */
+function expenseToInsertRow(e: Expense) {
   return {
     description: e.description,
     amount: e.amount,
     category: e.category,
-    date: e.date ? new Date(e.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
-    status: e.status,
+    date: isoDate(e.date),
+    status: "pending" as const,
     submitted_by: e.submittedBy,
-    approved_by: e.approvedBy || null,
+    approved_by: null,
     receipt_url: e.receiptUrl || null,
     notes: e.notes || null,
   }
@@ -89,17 +92,17 @@ function toReimbursement(row: Record<string, unknown>): Reimbursement {
   }
 }
 
-function reimbursementToRow(r: Reimbursement) {
+function reimbursementToInsertRow(r: Reimbursement) {
   return {
     submitted_by: r.submittedBy,
     amount: r.amount,
     description: r.description,
     category: r.category,
-    date: r.date ? new Date(r.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
-    status: r.status,
+    date: isoDate(r.date),
+    status: "pending" as const,
     receipt_url: r.receiptUrl || null,
-    approved_by: r.approvedBy || null,
-    paid_date: r.paidDate ? new Date(r.paidDate).toISOString().split("T")[0] : null,
+    approved_by: null,
+    paid_date: null,
     notes: r.notes || null,
   }
 }
@@ -121,24 +124,31 @@ function incomeToRow(i: Income) {
     source: i.source,
     amount: i.amount,
     type: i.type,
-    date: i.date ? new Date(i.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+    date: isoDate(i.date),
     notes: i.notes || null,
     recurring: i.recurring || false,
   }
 }
 
 interface FinanceContextType {
+  /** totalBudget is 0 until a budget row exists; check budgetSet before dividing. */
   budget: Budget
+  budgetSet: boolean
   expenses: Expense[]
   reimbursements: Reimbursement[]
   income: Income[]
-  addExpense: (expense: Expense) => void
-  updateExpenseStatus: (id: string, status: ExpenseStatus, approvedBy?: string) => void
-  deleteExpense: (id: string) => void
-  addReimbursement: (reimbursement: Reimbursement) => void
-  updateReimbursementStatus: (id: string, status: ReimbursementStatus, approvedBy?: string) => void
-  addIncome: (income: Income) => void
-  deleteIncome: (id: string) => void
+  loading: boolean
+  /** Message of the last failed load, or null. */
+  error: string | null
+  refresh: () => Promise<void>
+  /** All mutations update optimistically, roll back + toast on failure, then rethrow. */
+  addExpense: (expense: Expense) => Promise<void>
+  updateExpenseStatus: (id: string, status: ExpenseStatus, approvedBy?: string) => Promise<void>
+  deleteExpense: (id: string) => Promise<void>
+  addReimbursement: (reimbursement: Reimbursement) => Promise<void>
+  updateReimbursementStatus: (id: string, status: ReimbursementStatus, approvedBy?: string) => Promise<void>
+  addIncome: (income: Income) => Promise<void>
+  deleteIncome: (id: string) => Promise<void>
   totalSpent: number
   totalIncome: number
   totalPending: number
@@ -146,88 +156,118 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined)
 
-export function FinanceProvider({ 
-  children, 
-  initialExpenses = [], 
-  initialIncome = [], 
-  initialReimbursements = [] 
-}: { 
-  children: React.ReactNode,
-  initialExpenses?: Expense[],
-  initialIncome?: Income[],
-  initialReimbursements?: Reimbursement[]
-}) {
-  const [budget, setBudget] = useState<Budget>(SEED_BUDGET)
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses)
-  const [reimbursements, setReimbursements] = useState<Reimbursement[]>(initialReimbursements)
-  const [income, setIncome] = useState<Income[]>(initialIncome)
+/** Re-insert a removed item at its old index unless it already came back. */
+function reinsert<T extends { id: string }>(list: T[], item: T, index: number): T[] {
+  if (list.some((x) => x.id === item.id)) return list
+  const next = [...list]
+  next.splice(Math.min(Math.max(index, 0), next.length), 0, item)
+  return next
+}
+
+export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
-  const orgId = user?.id
+  const userId = user?.id ?? null
+  const notifyError = useErrorToast()
+
+  const [budget, setBudget] = useState<Budget>(EMPTY_BUDGET)
+  const [budgetSet, setBudgetSet] = useState(false)
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [reimbursements, setReimbursements] = useState<Reimbursement[]>([])
+  const [income, setIncome] = useState<Income[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const expensesRef = useRef(expenses)
+  expensesRef.current = expenses
+  const reimbursementsRef = useRef(reimbursements)
+  reimbursementsRef.current = reimbursements
+  const incomeRef = useRef(income)
+  incomeRef.current = income
+  const requestRef = useRef(0)
+
+  const reset = useCallback(() => {
+    setBudget(EMPTY_BUDGET)
+    setBudgetSet(false)
+    setExpenses([])
+    setReimbursements([])
+    setIncome([])
+    setError(null)
+  }, [])
+
+  const load = useCallback(async () => {
+    if (!userId) return
+    const requestId = ++requestRef.current
+    setLoading(true)
+    setError(null)
+    try {
+      const [budgetRes, expRes, reimRes, incRes] = await Promise.all([
+        supabase.from("budgets").select("*").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("expenses").select("*").order("date", { ascending: false }),
+        supabase.from("reimbursements").select("*").order("date", { ascending: false }),
+        supabase.from("income").select("*").order("date", { ascending: false }),
+      ])
+      if (requestId !== requestRef.current) return
+
+      const failures: string[] = []
+      const check = (name: string, err: unknown) => {
+        if (!err) return true
+        logError(`Failed to load ${name}`, "FinanceContext", err)
+        failures.push(`${name}: ${errorMessage(err)}`)
+        return false
+      }
+
+      if (check("budget", budgetRes.error)) {
+        const row = budgetRes.data as Record<string, unknown> | null
+        const total = row ? Number(row.total_budget) : 0
+        const isSet = !!row && Number.isFinite(total) && total > 0
+        setBudget({ totalBudget: isSet ? total : 0, termLabel: row ? String(row.term_label ?? "") : "" })
+        setBudgetSet(isSet)
+      }
+      if (check("expenses", expRes.error)) {
+        setExpenses(((expRes.data ?? []) as Record<string, unknown>[]).map(toExpense))
+      }
+      if (check("reimbursements", reimRes.error)) {
+        setReimbursements(((reimRes.data ?? []) as Record<string, unknown>[]).map(toReimbursement))
+      }
+      if (check("income", incRes.error)) {
+        setIncome(((incRes.data ?? []) as Record<string, unknown>[]).map(toIncome))
+      }
+
+      if (failures.length > 0) {
+        const msg = failures.join("; ")
+        setError(msg)
+        notifyError("Couldn't load finance data", msg)
+      }
+    } catch (err) {
+      if (requestId !== requestRef.current) return
+      const msg = errorMessage(err)
+      logError("Failed to load finance data", "FinanceContext", err)
+      setError(msg)
+      notifyError("Couldn't load finance data", msg)
+    } finally {
+      if (requestId === requestRef.current) setLoading(false)
+    }
+  }, [userId, notifyError])
 
   useEffect(() => {
-    if (initialExpenses.length > 0 || initialIncome.length > 0 || initialReimbursements.length > 0) return
-    async function load() {
-      const budgetQuery = supabase.from("budgets").select("*").limit(1)
-      if (orgId) {
-        budgetQuery.eq("organization_id", orgId)
-      }
-      const { data: budgetData } = await budgetQuery.single()
-      if (budgetData) {
-        setBudget({ totalBudget: Number(budgetData.total_budget), termLabel: budgetData.term_label as string })
-      }
-
-      const expQuery = supabase.from("expenses").select("*").order("date", { ascending: false })
-      if (orgId) {
-        expQuery.eq("organization_id", orgId)
-      }
-      const { data: expData, error: expErr } = await expQuery
-      if (expErr) {
-        logError("Failed to load expenses", 'FinanceContext', expErr)
-        setExpenses(SEED_EXPENSES)
-      } else if (expData && expData.length > 0) {
-        setExpenses(expData.map(toExpense))
-      } else {
-        const rows = SEED_EXPENSES.map(e => ({ ...expenseToRow(e), organization_id: orgId }))
-        const { data: seeded } = await supabase.from("expenses").insert(rows).select()
-        setExpenses(seeded ? seeded.map(toExpense) : SEED_EXPENSES)
-      }
-
-      // Reimbursements
-      const reimQuery = supabase.from("reimbursements").select("*").order("date", { ascending: false })
-      if (orgId) {
-        reimQuery.eq("organization_id", orgId)
-      }
-      const { data: reimData, error: reimErr } = await reimQuery
-      if (reimErr) {
-        logError("Failed to load reimbursements", 'FinanceContext', reimErr)
-        setReimbursements(SEED_REIMBURSEMENTS)
-      } else if (reimData && reimData.length > 0) {
-        setReimbursements(reimData.map(toReimbursement))
-      } else {
-        const rows = SEED_REIMBURSEMENTS.map(r => ({ ...reimbursementToRow(r), organization_id: orgId }))
-        const { data: seeded } = await supabase.from("reimbursements").insert(rows).select()
-        setReimbursements(seeded ? seeded.map(toReimbursement) : SEED_REIMBURSEMENTS)
-      }
-
-      // Income
-      const incQuery = supabase.from("income").select("*").order("date", { ascending: false })
-      if (orgId) {
-        incQuery.eq("organization_id", orgId)
-      }
-      const { data: incData, error: incErr } = await incQuery
-      if (incErr) {
-        logError("Failed to load income", 'FinanceContext', incErr)
-        setIncome(SEED_INCOME)
-      } else if (incData && incData.length > 0) {
-        setIncome(incData.map(toIncome))
-      } else {
-        const rows = SEED_INCOME.map(i => ({ ...incomeToRow(i), organization_id: orgId }))
-        const { data: seeded } = await supabase.from("income").insert(rows).select()
-        setIncome(seeded ? seeded.map(toIncome) : SEED_INCOME)
-      }
+    // Clear on sign-out / user switch; never query while signed out.
+    reset()
+    if (!userId) {
+      requestRef.current++
+      setLoading(false)
+      return
     }
-    load()
-  }, [orgId, initialExpenses.length, initialIncome.length, initialReimbursements.length])
+    void load()
+    return () => {
+      requestRef.current++
+    }
+  }, [userId, load, reset])
+
+  const fail = useCallback((action: string, err: unknown): never => {
+    logError(`Failed to ${action}`, "FinanceContext", err)
+    notifyError(`Couldn't ${action}`, errorMessage(err))
+    throw err
+  }, [notifyError])
 
   const totalSpent = useMemo(
     () => expenses.filter((e) => e.status === "approved").reduce((sum, e) => sum + e.amount, 0),
@@ -244,118 +284,160 @@ export function FinanceProvider({
     [expenses]
   )
 
+  // ── Expenses ──────────────────────────────────────────────────────────────
+
   const addExpense = useCallback(async (expense: Expense) => {
-    const row = { ...expenseToRow({ ...expense, id: crypto.randomUUID() }), organization_id: orgId }
-    const { data, error } = await supabase.from("expenses").insert(row).select().single()
-    if (error) { 
-      logError("Failed to add expense", 'FinanceContext', error)
-      throw error
+    const tempId = `temp-${crypto.randomUUID()}`
+    setExpenses((prev) => [{ ...expense, id: tempId, status: "pending", approvedBy: undefined }, ...prev])
+    try {
+      const { data, error: err } = await supabase.from("expenses").insert(expenseToInsertRow(expense)).select().single()
+      if (err) throw err
+      if (!data) throw new Error("Expense was not created")
+      const created = toExpense(data as Record<string, unknown>)
+      setExpenses((prev) => prev.map((e) => (e.id === tempId ? created : e)))
+    } catch (err) {
+      setExpenses((prev) => prev.filter((e) => e.id !== tempId))
+      fail("add expense", err)
     }
-    if (data) setExpenses((prev) => [toExpense(data), ...prev])
-  }, [orgId])
+  }, [fail])
 
   const updateExpenseStatus = useCallback(async (id: string, status: ExpenseStatus, approvedBy?: string) => {
-  const update: { status: string; approved_by?: string; organization_id?: string } = { status }
-  if (approvedBy) update.approved_by = approvedBy
-  if (orgId) update.organization_id = orgId
-  
-  const { error } = await supabase.from("expenses").update(update as any).eq("id", id)
-  
-  if (error) { 
-    logError("Failed to update expense", 'FinanceContext', error)
-    throw error // This is vital for the .rejects test to work
-  }
-
-  setExpenses((prev) =>
-    prev.map((e) => (e.id === id ? { ...e, status, approvedBy: approvedBy || e.approvedBy } : e))
-  )
-  }, [])
+    const previous = expensesRef.current.find((e) => e.id === id)
+    const update: { status: ExpenseStatus; approved_by?: string } = { status }
+    if (approvedBy) update.approved_by = approvedBy
+    setExpenses((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, status, approvedBy: approvedBy || e.approvedBy } : e))
+    )
+    try {
+      const { error: err } = await supabase.from("expenses").update(update).eq("id", id)
+      if (err) throw err
+    } catch (err) {
+      if (previous) setExpenses((prev) => prev.map((e) => (e.id === id ? previous : e)))
+      fail("update expense", err)
+    }
+  }, [fail])
 
   const deleteExpense = useCallback(async (id: string) => {
-    const { error } = await supabase.from("expenses").delete().eq("id", id)
-    if (error) {
-       logError("Failed to delete expense", 'FinanceContext', error)
-       throw error
-    }
+    const index = expensesRef.current.findIndex((e) => e.id === id)
+    const previous = index >= 0 ? expensesRef.current[index] : undefined
     setExpenses((prev) => prev.filter((e) => e.id !== id))
-  }, [])
+    try {
+      const { error: err } = await supabase.from("expenses").delete().eq("id", id)
+      if (err) throw err
+    } catch (err) {
+      if (previous) setExpenses((prev) => reinsert(prev, previous, index))
+      fail("delete expense", err)
+    }
+  }, [fail])
+
+  // ── Reimbursements ────────────────────────────────────────────────────────
 
   const addReimbursement = useCallback(async (reimbursement: Reimbursement) => {
-    const row = { ...reimbursementToRow({ ...reimbursement, id: crypto.randomUUID() }), organization_id: orgId }
-    const { data, error } = await supabase.from("reimbursements").insert(row).select().single()
-    if (error) { 
-      logError("Failed to add reimbursement", 'FinanceContext', error)
-      throw error
+    const tempId = `temp-${crypto.randomUUID()}`
+    setReimbursements((prev) => [
+      { ...reimbursement, id: tempId, status: "pending", approvedBy: undefined, paidDate: undefined },
+      ...prev,
+    ])
+    try {
+      const { data, error: err } = await supabase
+        .from("reimbursements")
+        .insert(reimbursementToInsertRow(reimbursement))
+        .select()
+        .single()
+      if (err) throw err
+      if (!data) throw new Error("Reimbursement was not created")
+      const created = toReimbursement(data as Record<string, unknown>)
+      setReimbursements((prev) => prev.map((r) => (r.id === tempId ? created : r)))
+    } catch (err) {
+      setReimbursements((prev) => prev.filter((r) => r.id !== tempId))
+      fail("add reimbursement", err)
     }
-    if (data) setReimbursements((prev) => [toReimbursement(data), ...prev])
-  }, [orgId])
+  }, [fail])
 
   const updateReimbursementStatus = useCallback(
     async (id: string, status: ReimbursementStatus, approvedBy?: string) => {
-      const update: { status: string; approved_by?: string; paid_date?: string; organization_id?: string } = { status }
+      const previous = reimbursementsRef.current.find((r) => r.id === id)
+      const paidDate = status === "paid" ? new Date() : undefined
+      const update: { status: ReimbursementStatus; approved_by?: string; paid_date?: string } = { status }
       if (approvedBy) update.approved_by = approvedBy
-      if (status === "paid") update.paid_date = new Date().toISOString().split("T")[0]
-      if (orgId) update.organization_id = orgId
-      const { error } = await supabase.from("reimbursements").update(update as any).eq("id", id)
-      if (error) { 
-        logError("Failed to update reimbursement", 'FinanceContext', error)
-        throw error
-      }
+      if (paidDate) update.paid_date = isoDate(paidDate)
       setReimbursements((prev) =>
         prev.map((r) =>
           r.id === id
-            ? {
-                ...r,
-                status,
-                approvedBy: approvedBy || r.approvedBy,
-                paidDate: status === "paid" ? new Date() : r.paidDate,
-              }
+            ? { ...r, status, approvedBy: approvedBy || r.approvedBy, paidDate: paidDate ?? r.paidDate }
             : r
         )
       )
+      try {
+        const { error: err } = await supabase.from("reimbursements").update(update).eq("id", id)
+        if (err) throw err
+      } catch (err) {
+        if (previous) setReimbursements((prev) => prev.map((r) => (r.id === id ? previous : r)))
+        fail("update reimbursement", err)
+      }
     },
-    [orgId]
+    [fail]
   )
+
+  // ── Income ────────────────────────────────────────────────────────────────
 
   const addIncome = useCallback(async (inc: Income) => {
-    const row = { ...incomeToRow(inc), organization_id: orgId }
-    const { data, error } = await supabase.from("income").insert(row).select().single()
-    if (error) { logError("Failed to add income", 'FinanceContext', error); throw error }
-    if (data) setIncome((prev) => [toIncome(data), ...prev])
-  }, [orgId])
+    const tempId = `temp-${crypto.randomUUID()}`
+    setIncome((prev) => [{ ...inc, id: tempId }, ...prev])
+    try {
+      const { data, error: err } = await supabase.from("income").insert(incomeToRow(inc)).select().single()
+      if (err) throw err
+      if (!data) throw new Error("Income was not created")
+      const created = toIncome(data as Record<string, unknown>)
+      setIncome((prev) => prev.map((i) => (i.id === tempId ? created : i)))
+    } catch (err) {
+      setIncome((prev) => prev.filter((i) => i.id !== tempId))
+      fail("add income", err)
+    }
+  }, [fail])
 
   const deleteIncome = useCallback(async (id: string) => {
-    const query = supabase.from("income").delete().eq("id", id)
-    if (orgId) {
-      query.eq("organization_id", orgId)
-    }
-    const { error } = await query
-    if (error) { logError("Failed to delete income", 'FinanceContext', error); return }
+    const index = incomeRef.current.findIndex((i) => i.id === id)
+    const previous = index >= 0 ? incomeRef.current[index] : undefined
     setIncome((prev) => prev.filter((i) => i.id !== id))
-  }, [orgId])
+    try {
+      const { error: err } = await supabase.from("income").delete().eq("id", id)
+      if (err) throw err
+    } catch (err) {
+      if (previous) setIncome((prev) => reinsert(prev, previous, index))
+      fail("delete income", err)
+    }
+  }, [fail])
 
-  return (
-    <FinanceContext.Provider
-      value={{
-        budget,
-        expenses,
-        reimbursements,
-        income,
-        addExpense,
-        updateExpenseStatus,
-        deleteExpense,
-        addReimbursement,
-        updateReimbursementStatus,
-        addIncome,
-        deleteIncome,
-        totalSpent,
-        totalIncome,
-        totalPending,
-      }}
-    >
-      {children}
-    </FinanceContext.Provider>
+  const value = useMemo<FinanceContextType>(
+    () => ({
+      budget,
+      budgetSet,
+      expenses,
+      reimbursements,
+      income,
+      loading,
+      error,
+      refresh: load,
+      addExpense,
+      updateExpenseStatus,
+      deleteExpense,
+      addReimbursement,
+      updateReimbursementStatus,
+      addIncome,
+      deleteIncome,
+      totalSpent,
+      totalIncome,
+      totalPending,
+    }),
+    [
+      budget, budgetSet, expenses, reimbursements, income, loading, error, load,
+      addExpense, updateExpenseStatus, deleteExpense, addReimbursement, updateReimbursementStatus,
+      addIncome, deleteIncome, totalSpent, totalIncome, totalPending,
+    ]
   )
+
+  return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>
 }
 
 export function useFinance() {

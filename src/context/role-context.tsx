@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { logError } from "@/lib/logger";
+import React, { createContext, useContext, useMemo } from "react";
 import { useAuth } from "@/context/auth-context";
+import { normalizeRole } from "@/lib/permissions";
 
 export type Role =
   | "President"
@@ -12,55 +12,34 @@ export type Role =
   | "Executive"
   | "Administrator";
 
+/**
+ * The role is derived ONLY from the server-side `profiles.role` column.
+ * There is intentionally no `setRole`: roles are assigned by a President /
+ * Administrator through the `set_member_role` RPC (see settings page).
+ */
 interface RoleContextType {
   role: Role;
-  setRole: (role: Role) => Promise<void>;
+  /** Raw value stored in profiles.role (may be legacy, e.g. "member"). */
+  rawRole: string | null;
 }
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
 
-export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const { user, profile, updateProfile } = useAuth();
-  const [role, setRole] = useState<Role>(() => {
-    const saved = localStorage.getItem("clubrm-demo-role") as Role;
-    return saved || "President";
-  });
-
-  useEffect(() => {
-    if (profile?.role) {
-      const nextRole = profile.role as Role;
-      setRole(nextRole);
-      localStorage.setItem("clubrm-demo-role", nextRole);
-    }
-  }, [profile?.role]);
-
-  const handleSetRole = async (newRole: Role) => {
-    setRole(newRole);
-    localStorage.setItem("clubrm-demo-role", newRole);
-
-    if (user && profile?.full_name) {
-      try {
-        await updateProfile({
-          full_name: profile.full_name,
-          role: newRole,
-        });
-      } catch (error) {
-        logError("role update failed", 'RoleContext', error);
-      }
-    }
-  };
-
-  return (
-    <RoleContext.Provider value={{ role, setRole: handleSetRole }}>
-      {children}
-    </RoleContext.Provider>
-  );
+function useDerivedRole(): RoleContextType {
+  const { profile } = useAuth();
+  const rawRole = profile?.role ?? null;
+  return useMemo(() => ({ role: normalizeRole(rawRole), rawRole }), [rawRole]);
 }
 
-export function useRole() {
+export function RoleProvider({ children }: { children: React.ReactNode }) {
+  const value = useDerivedRole();
+  return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>;
+}
+
+export function useRole(): RoleContextType {
   const context = useContext(RoleContext);
-  if (context === undefined) {
-    throw new Error("useRole must be used within a RoleProvider");
-  }
-  return context;
+  // Fallback keeps components working if rendered outside RoleProvider (e.g. tests);
+  // the value is still derived purely from the authenticated profile.
+  const derived = useDerivedRole();
+  return context ?? derived;
 }

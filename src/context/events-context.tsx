@@ -1,209 +1,35 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { logError } from "@/lib/logger"
 import { type CalendarEvent } from "@/components/events/types"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "./auth-context"
+import { useToast } from "./toast-context"
 
-const today = new Date()
-const year = today.getFullYear()
-const month = today.getMonth()
+/*
+ * Single-club data layer: every authenticated user reads the shared club rows;
+ * access is enforced by RLS (see supabase/migration-security-hardening.sql).
+ */
 
-function d(day: number, hour: number, min = 0) {
-  return new Date(year, month, day, hour, min)
+function errorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string") {
+    return (err as { message: string }).message
+  }
+  return typeof err === "string" ? err : "Unknown error"
 }
 
-export const SEED_EVENTS: CalendarEvent[] = [
-  {
-    id: "evt-1",
-    title: "Tech Talk: AI in 2026",
-    description: "Join us for a deep dive into the latest AI trends and how they impact student careers. Industry speakers from leading companies will share their insights.",
-    startDate: d(10, 18, 0),
-    endDate: d(10, 20, 0),
-    allDay: false,
-    location: "Room 101, Engineering Building",
-    colorId: "blue",
-    tags: ["workshop", "guest-speaker"],
-    collaborators: ["1", "2", "3"],
-    createdBy: "1",
-    capacity: 50,
-    registered: 45,
-    isPublic: true,
-    status: "confirmed",
-  },
-  {
-    id: "evt-2",
-    title: "Valentine Social",
-    description: "Annual club social event with music, food, and fun activities. Open to all members and their plus-ones!",
-    startDate: d(14, 20, 0),
-    endDate: d(14, 23, 0),
-    allDay: false,
-    location: "Main Hall, Student Center",
-    colorId: "rose",
-    tags: ["social"],
-    collaborators: ["1", "2", "6", "7", "8"],
-    createdBy: "2",
-    capacity: 100,
-    registered: 80,
-    isPublic: true,
-    status: "confirmed",
-  },
-  {
-    id: "evt-3",
-    title: "Resume Workshop",
-    description: "Hands-on workshop to polish your resume. Bring your laptop and current resume for personalized feedback.",
-    startDate: d(20, 14, 0),
-    endDate: d(20, 16, 0),
-    allDay: false,
-    location: "Lab 201, CS Building",
-    colorId: "emerald",
-    tags: ["workshop"],
-    collaborators: ["3", "5"],
-    createdBy: "3",
-    capacity: 30,
-    registered: 12,
-    isPublic: true,
-    status: "draft",
-  },
-  {
-    id: "evt-4",
-    title: "Executive Board Meeting",
-    description: "Monthly executive board meeting. All VPs must attend. Agenda will be shared via email.",
-    startDate: d(5, 17, 0),
-    endDate: d(5, 18, 30),
-    allDay: false,
-    location: "Conference Room B",
-    colorId: "amber",
-    tags: ["meeting"],
-    collaborators: ["1", "2", "3", "4", "5", "6"],
-    createdBy: "1",
-    isPublic: false,
-    status: "confirmed",
-  },
-  {
-    id: "evt-5",
-    title: "Sponsor Networking Mixer",
-    description: "Meet potential sponsors in a casual setting. Dress business casual. Appetizers and drinks provided.",
-    startDate: d(22, 18, 0),
-    endDate: d(22, 21, 0),
-    allDay: false,
-    location: "Rooftop Lounge, Business Building",
-    colorId: "violet",
-    tags: ["networking", "fundraiser"],
-    collaborators: ["1", "5", "4"],
-    createdBy: "5",
-    capacity: 40,
-    registered: 28,
-    isPublic: false,
-    status: "confirmed",
-  },
-  {
-    id: "evt-6",
-    title: "Hackathon Planning",
-    description: "Planning session for the upcoming spring hackathon. Discuss logistics, sponsors, and prizes.",
-    startDate: d(8, 12, 0),
-    endDate: d(8, 13, 0),
-    allDay: false,
-    location: "Room 305",
-    colorId: "cyan",
-    tags: ["meeting"],
-    collaborators: ["1", "2", "3"],
-    createdBy: "2",
-    isPublic: false,
-    status: "confirmed",
-  },
-  {
-    id: "evt-7",
-    title: "Club Photo Day",
-    description: "Annual club photos for the yearbook and social media. Wear club t-shirts!",
-    startDate: d(17, 0, 0),
-    endDate: d(17, 23, 59),
-    allDay: true,
-    location: "Campus Quad",
-    colorId: "pink",
-    tags: ["social"],
-    collaborators: ["6", "2"],
-    createdBy: "6",
-    isPublic: true,
-    status: "confirmed",
-  },
-  {
-    id: "evt-8",
-    title: "Study Session: Algorithms",
-    description: "Group study for midterm prep. Covering dynamic programming, graph algorithms, and greedy methods.",
-    startDate: d(12, 10, 0),
-    endDate: d(12, 12, 30),
-    allDay: false,
-    location: "Library Room 4B",
-    colorId: "slate",
-    tags: ["study-session"],
-    collaborators: ["7", "8", "9", "10"],
-    createdBy: "7",
-    isPublic: true,
-    status: "confirmed",
-  },
-  {
-    id: "evt-9",
-    title: "Budget Review Q1",
-    description: "Quarterly budget review with the finance committee. All expense reports must be submitted beforehand.",
-    startDate: d(25, 15, 0),
-    endDate: d(25, 16, 30),
-    allDay: false,
-    location: "Finance Office",
-    colorId: "orange",
-    tags: ["meeting"],
-    collaborators: ["1", "4"],
-    createdBy: "4",
-    isPublic: false,
-    status: "confirmed",
-  },
-  {
-    id: "evt-10",
-    title: "Coding Competition",
-    description: "Inter-club coding competition. Teams of 3. Prizes for top 3 teams!",
-    startDate: d(28, 9, 0),
-    endDate: d(28, 17, 0),
-    allDay: false,
-    location: "CS Lab 100",
-    colorId: "blue",
-    tags: ["competition"],
-    collaborators: ["1", "2", "3", "7", "8"],
-    createdBy: "2",
-    capacity: 60,
-    registered: 42,
-    isPublic: true,
-    status: "confirmed",
-  },
-  {
-    id: "evt-11",
-    title: "Weekly Standup",
-    description: "Quick sync on task progress and blockers.",
-    startDate: d(3, 9, 0),
-    endDate: d(3, 9, 30),
-    allDay: false,
-    location: "Zoom",
-    colorId: "amber",
-    tags: ["meeting"],
-    collaborators: ["1", "2", "3", "4", "5", "6"],
-    createdBy: "1",
-    isPublic: false,
-    status: "confirmed",
-  },
-  {
-    id: "evt-12",
-    title: "Marketing Strategy Session",
-    description: "Planning social media content for the rest of the semester.",
-    startDate: d(15, 13, 0),
-    endDate: d(15, 14, 30),
-    allDay: false,
-    location: "Room 202",
-    colorId: "pink",
-    tags: ["meeting"],
-    collaborators: ["1", "6"],
-    createdBy: "6",
-    isPublic: false,
-    status: "confirmed",
-  },
-]
+/** Toast helper that degrades to a no-op when no ToastProvider is mounted. */
+function useErrorToast() {
+  let showToast: ReturnType<typeof useToast>["showToast"] | null = null
+  try {
+    showToast = useToast().showToast
+  } catch {
+    showToast = null
+  }
+  return useCallback(
+    (title: string, message?: string) => showToast?.({ type: "error", title, message }),
+    [showToast]
+  )
+}
 
 function toEvent(row: Record<string, unknown>): CalendarEvent {
   return {
@@ -215,8 +41,8 @@ function toEvent(row: Record<string, unknown>): CalendarEvent {
     allDay: row.all_day as boolean,
     location: row.location as string,
     colorId: row.color_id as string,
-    tags: row.tags as string[],
-    collaborators: row.collaborators as string[],
+    tags: (row.tags as string[]) || [],
+    collaborators: (row.collaborators as string[]) || [],
     createdBy: row.created_by as string,
     capacity: row.capacity as number | undefined,
     registered: row.registered as number | undefined,
@@ -249,81 +75,121 @@ function toRow(e: CalendarEvent) {
 
 interface EventsContextType {
   events: CalendarEvent[]
-  addEvent: (event: CalendarEvent) => void
-  updateEvent: (event: CalendarEvent) => void
-  deleteEvent: (id: string) => void
+  loading: boolean
+  /** Message of the last failed load, or null. */
+  error: string | null
+  refresh: () => Promise<void>
+  /** All mutations update optimistically, roll back + toast on failure, then rethrow. */
+  addEvent: (event: CalendarEvent) => Promise<void>
+  updateEvent: (event: CalendarEvent) => Promise<void>
+  deleteEvent: (id: string) => Promise<void>
   getEventsForDate: (date: Date) => CalendarEvent[]
   getEventsForRange: (start: Date, end: Date) => CalendarEvent[]
 }
 
 const EventsContext = createContext<EventsContextType | undefined>(undefined)
 
-export function EventsProvider({ children, initialEvents = [] }: { children: React.ReactNode, initialEvents?: CalendarEvent[] }) {
-  const [events, setEvents] = useState<CalendarEvent[]>(initialEvents)
+export function EventsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
-  const orgId = user?.id
+  const userId = user?.id ?? null
+  const notifyError = useErrorToast()
+
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const eventsRef = useRef<CalendarEvent[]>(events)
+  eventsRef.current = events
+  const requestRef = useRef(0)
+
+  const load = useCallback(async () => {
+    if (!userId) return
+    const requestId = ++requestRef.current
+    setLoading(true)
+    setError(null)
+    try {
+      const { data, error: loadErr } = await supabase.from("events").select("*").order("start_date", { ascending: true })
+      if (requestId !== requestRef.current) return
+      if (loadErr) throw loadErr
+      setEvents(((data ?? []) as Record<string, unknown>[]).map(toEvent))
+    } catch (err) {
+      if (requestId !== requestRef.current) return
+      const msg = errorMessage(err)
+      logError("Failed to load events", "EventsContext", err)
+      setError(msg)
+      notifyError("Couldn't load events", msg)
+    } finally {
+      if (requestId === requestRef.current) setLoading(false)
+    }
+  }, [userId, notifyError])
 
   useEffect(() => {
-    if (initialEvents.length > 0) return
-    async function load() {
-      const query = supabase.from("events").select("*").order("start_date", { ascending: true })
-      if (orgId) {
-        query.eq("organization_id", orgId)
-      }
-      const { data, error } = await query
-      if (error) {
-        logError("Failed to load events", 'EventsContext', error)
-        setEvents(SEED_EVENTS)
-        return
-      }
-      if (data && data.length > 0) {
-        setEvents(data.map(toEvent))
-      } else {
-        const rows = SEED_EVENTS.map(e => ({ ...toRow(e), organization_id: orgId }))
-        const { data: seeded, error: seedErr } = await supabase.from("events").insert(rows).select()
-        if (seedErr) {
-          logError("Failed to seed events", 'EventsContext', seedErr)
-          setEvents(SEED_EVENTS)
-        } else if (seeded) {
-          setEvents(seeded.map(toEvent))
-        }
-      }
+    // Clear on sign-out / user switch; never query while signed out.
+    setEvents([])
+    setError(null)
+    if (!userId) {
+      requestRef.current++
+      setLoading(false)
+      return
     }
-    load()
-  }, [orgId, initialEvents.length])
+    void load()
+    return () => {
+      requestRef.current++
+    }
+  }, [userId, load])
+
+  const fail = useCallback((action: string, err: unknown): never => {
+    logError(`Failed to ${action}`, "EventsContext", err)
+    notifyError(`Couldn't ${action}`, errorMessage(err))
+    throw err
+  }, [notifyError])
 
   const addEvent = useCallback(async (event: CalendarEvent) => {
-    const row = { ...toRow(event), organization_id: orgId }
-    const { data, error } = await supabase.from("events").insert(row).select().single()
-    if (error) {
-      logError("Failed to add event", 'EventsContext', error)
-      return
+    const tempId = `temp-${crypto.randomUUID()}`
+    setEvents((prev) => [...prev, { ...event, id: tempId }])
+    try {
+      const { data, error: err } = await supabase.from("events").insert(toRow(event)).select().single()
+      if (err) throw err
+      if (!data) throw new Error("Event was not created")
+      const created = toEvent(data as Record<string, unknown>)
+      setEvents((prev) => prev.map((e) => (e.id === tempId ? created : e)))
+    } catch (err) {
+      setEvents((prev) => prev.filter((e) => e.id !== tempId))
+      fail("add event", err)
     }
-    if (data) setEvents((prev) => [...prev, toEvent(data)])
-  }, [orgId])
+  }, [fail])
 
   const updateEvent = useCallback(async (event: CalendarEvent) => {
-    const row = { ...toRow(event), organization_id: orgId }
-    const { error } = await supabase.from("events").update(row).eq("id", event.id)
-    if (error) {
-      logError("Failed to update event", 'EventsContext', error)
-      return
-    }
+    const previous = eventsRef.current.find((e) => e.id === event.id)
     setEvents((prev) => prev.map((e) => (e.id === event.id ? event : e)))
-  }, [orgId])
+    try {
+      const { error: err } = await supabase.from("events").update(toRow(event)).eq("id", event.id)
+      if (err) throw err
+    } catch (err) {
+      if (previous) setEvents((prev) => prev.map((e) => (e.id === previous.id ? previous : e)))
+      fail("update event", err)
+    }
+  }, [fail])
 
   const deleteEvent = useCallback(async (id: string) => {
-    const query = supabase.from("events").delete().eq("id", id)
-    if (orgId) {
-      query.eq("organization_id", orgId)
-    }
-    const { error } = await query
-    if (error) {
-      logError("Failed to delete event", 'EventsContext', error)
-      return
-    }
+    const index = eventsRef.current.findIndex((e) => e.id === id)
+    const previous = index >= 0 ? eventsRef.current[index] : undefined
     setEvents((prev) => prev.filter((e) => e.id !== id))
-  }, [orgId])
+    try {
+      const { error: err } = await supabase.from("events").delete().eq("id", id)
+      if (err) throw err
+    } catch (err) {
+      if (previous) {
+        setEvents((prev) => {
+          if (prev.some((e) => e.id === id)) return prev
+          const next = [...prev]
+          next.splice(Math.min(index, next.length), 0, previous)
+          return next
+        })
+      }
+      fail("delete event", err)
+    }
+  }, [fail])
 
   const getEventsForDate = useCallback(
     (date: Date) => {
@@ -349,13 +215,12 @@ export function EventsProvider({ children, initialEvents = [] }: { children: Rea
     [events]
   )
 
-  return (
-    <EventsContext.Provider
-      value={{ events, addEvent, updateEvent, deleteEvent, getEventsForDate, getEventsForRange }}
-    >
-      {children}
-    </EventsContext.Provider>
+  const value = useMemo(
+    () => ({ events, loading, error, refresh: load, addEvent, updateEvent, deleteEvent, getEventsForDate, getEventsForRange }),
+    [events, loading, error, load, addEvent, updateEvent, deleteEvent, getEventsForDate, getEventsForRange]
   )
+
+  return <EventsContext.Provider value={value}>{children}</EventsContext.Provider>
 }
 
 export function useEvents() {

@@ -4,6 +4,7 @@ import { AlertTriangle, Loader2, Check } from "lucide-react"
 import { ExpandableTile } from "../insights/expandable-tile"
 import { RisksPanel } from "../insights/panels/risks-panel"
 import { Button } from "@/components/ui/button"
+import type { RisksInsight } from "../insights/types"
 
 interface RiskItem {
   id: string;
@@ -15,7 +16,7 @@ interface RiskItem {
 
 interface RiskAlertsWidgetProps {
   risks: RiskItem[];
-  insightData: any;
+  insightData: RisksInsight | null;
   actioningId: string | null;
   onResolveTask: (id: string, e?: React.MouseEvent) => void;
 }

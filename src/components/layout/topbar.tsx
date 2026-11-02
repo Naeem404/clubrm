@@ -17,11 +17,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import {
   Popover,
@@ -29,8 +24,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useRole, type Role } from "@/context/role-context";
+import { useRole } from "@/context/role-context";
 import { useAuth } from "@/context/auth-context";
+import { canAccess } from "@/lib/permissions";
 
 interface NotificationPrefs {
   emailDigest: boolean
@@ -62,17 +58,6 @@ const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   financeAlerts: true,
   memberJoined: false,
 };
-
-const ROLES: Role[] = [
-  "President",
-  "VP Internal",
-  "VP Finance",
-  "VP Events",
-  "VP External",
-  "Marketing",
-  "Executive",
-  "Administrator",
-];
 
 function readNotificationPrefs(): NotificationPrefs {
   try {
@@ -108,7 +93,7 @@ function appendSearchMatches<T>(
 }
 
 export function TopBar() {
-  const { role, setRole } = useRole();
+  const { role } = useRole();
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const { events } = useEvents();
@@ -132,14 +117,17 @@ export function TopBar() {
 
   useEffect(() => {
     const db = supabase as any;
+    const canSearchSponsors = canAccess(role, "/external");
     Promise.all([
-      supabase.from("sponsors").select("id, company, industry, tier"),
+      canSearchSponsors
+        ? supabase.from("sponsors").select("id, company, industry, tier")
+        : Promise.resolve({ data: [] }),
       db.from("documents").select("id, name, category, tags"),
     ]).then(([sponsorsRes, docsRes]: [any, any]) => {
-      if (sponsorsRes.data) setSearchSponsors(sponsorsRes.data);
+      setSearchSponsors(sponsorsRes.data ?? []);
       if (docsRes.data) setSearchDocs(docsRes.data);
     });
-  }, []);
+  }, [role]);
 
   const notifications = useMemo(() => {
     const items: { id: string; title: string; sub: string; time: string; route: string; read: boolean }[] = [];
@@ -187,8 +175,9 @@ export function TopBar() {
         items.push({ id: `n-member-${member.id}`, title: `${member.name} joined the club`, sub: `${member.role} • ${member.department}`, time: "Recently", route: "/members", read: false });
       });
     }
-    return items;
-  }, [events, expenses, members, notificationPrefs, reimbursements, tasks, user?.email]);
+    // Only surface notifications for modules this role can open.
+    return items.filter((item) => canAccess(role, item.route));
+  }, [events, expenses, members, notificationPrefs, reimbursements, tasks, user?.email, role]);
 
   const [readNotifs, setReadNotifs] = useState<Set<string>>(() => {
     try {
@@ -331,8 +320,9 @@ export function TopBar() {
       (sponsor) => ({ type: "Sponsor", label: sponsor.company, sub: sponsor.industry, route: "/external" }),
     );
 
-    return results;
-  }, [searchQuery, events, tasks, members, expenses, reimbursements, income, searchDocs, searchSponsors]);
+    // Hide results that point to modules this role cannot open.
+    return results.filter((result) => canAccess(role, result.route));
+  }, [searchQuery, events, tasks, members, expenses, reimbursements, income, searchDocs, searchSponsors, role]);
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 w-full bg-background/95 backdrop-blur sticky top-0 z-50">
@@ -465,28 +455,23 @@ export function TopBar() {
               <p className="text-xs text-muted-foreground truncate">{displayEmail}</p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <ShieldCheck className="mr-2 h-4 w-4 text-primary" />
-                <span>Switch Role</span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup value={role} onValueChange={(v) => setRole(v as Role)}>
-                  {ROLES.map((r) => (
-                    <DropdownMenuRadioItem key={r} value={r} className="text-xs">{r}</DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              <span>Role: <span className="font-medium text-foreground">{role}</span></span>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/profile")}>
-              <User className="mr-2 h-4 w-4" />
-              <span>Profile</span>
+            {canAccess(role, "/profile") && (
+              <DropdownMenuItem onClick={() => navigate("/profile")}>
+                <User className="mr-2 h-4 w-4" />
+                <span>Profile</span>
               </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate("/settings")}>
-              <Settings className="mr-2 h-4 w-4" />
-              <span>Settings</span>
-            </DropdownMenuItem>
+            )}
+            {canAccess(role, "/settings") && (
+              <DropdownMenuItem onClick={() => navigate("/settings")}>
+                <Settings className="mr-2 h-4 w-4" />
+                <span>Settings</span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={() => signOut()}>
               <LogOut className="mr-2 h-4 w-4" />

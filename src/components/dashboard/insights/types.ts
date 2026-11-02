@@ -21,7 +21,9 @@ export interface HealthBreakdown {
 
 export interface OrgHealthInsight {
   overallScore: number;
-  previousScore: number;
+  /** Score from the previous period. `null` when no historical snapshot exists. */
+  previousScore: number | null;
+  /** Historical score points. Empty when no history is recorded. */
   trend: TrendPoint[];
   breakdowns: HealthBreakdown[];
   topStrengths: string[];
@@ -60,12 +62,18 @@ export interface MembersInsight {
 // ─── Budget ───────────────────────────────────────────────
 export interface CategorySpend {
   name: string;
-  allocated: number;
+  /** Allocated amount for this category. `null` when no per-category allocation is stored. */
+  allocated: number | null;
   spent: number;
+  /** Share of total approved spend, 0-100. */
+  shareOfSpend: number;
+  /** Only meaningful when `allocated` is known; "good" otherwise. */
   status: "good" | "warning" | "critical";
 }
 
 export interface BudgetInsight {
+  /** false when no budget row exists — totalBudget is then 0 and percentages are not meaningful. */
+  budgetSet: boolean;
   totalBudget: number;
   spent: number;
   remaining: number;
@@ -93,9 +101,12 @@ export interface EventDetail {
 
 export interface EventsInsight {
   totalUpcoming: number;
-  avgRegistrationRate: number;
-  volunteerCoverageRate: number;
+  /** Avg registered/capacity % across upcoming events with a capacity. `null` when none. */
+  avgRegistrationRate: number | null;
+  /** Volunteer data is not tracked yet → `null`. */
+  volunteerCoverageRate: number | null;
   events: EventDetail[];
+  /** Monthly registration rate (sum registered / sum capacity) for months that had events with a capacity. */
   trend: TrendPoint[];
   strengths: string[];
   concerns: string[];

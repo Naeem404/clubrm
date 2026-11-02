@@ -26,65 +26,33 @@ import {
 } from "@/components/ui/sidebar";
 
 import { useLocation, Link } from "react-router-dom";
-import { useRole, type Role } from "@/context/role-context";
+import { useRole } from "@/context/role-context";
 import { useTasks } from "@/context/tasks-context";
 import { useEvents } from "@/context/events-context";
 import { useFinance } from "@/context/finance-context";
-import { useAuth } from "@/context/auth-context";
+import { canAccess } from "@/lib/permissions";
 import { type LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface SidebarItem {
   title: string;
   url: string;
   icon: LucideIcon;
-  roles?: Role[];
   badge?: string;
 }
 
+// Visibility is decided by canAccess() in src/lib/permissions.ts (single source of truth).
 const items: SidebarItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Tasks", url: "/tasks", icon: CheckSquare, badge: "overdueTasks" },
   { title: "Events", url: "/events", icon: Calendar, badge: "eventRisks" },
   { title: "Members", url: "/members", icon: Users },
-  { 
-    title: "Finance", 
-    url: "/finance", 
-    icon: DollarSign, 
-    roles: ["President", "VP Finance", "Administrator"], 
-    badge: "pendingExpenses" 
-  },
-  { 
-    title: "External", 
-    url: "/external", 
-    icon: Handshake, 
-    roles: ["President", "VP External", "Administrator"] 
-  },
-  { 
-    title: "Contacts", 
-    url: "/contacts", 
-    icon: Contact, 
-    roles: ["President", "VP External", "Administrator"] 
-  },
-  { 
-    title: "Marketing", 
-    url: "/marketing", 
-    icon: Megaphone, 
-    roles: ["President", "Marketing", "Administrator"] 
-  },
-  { 
-    title: "Reports", 
-    url: "/reports", 
-    icon: BarChart, 
-    roles: ["President", "VP Internal", "VP Finance", "VP Events", "VP External", "Marketing", "Administrator"] 
-  },
+  { title: "Finance", url: "/finance", icon: DollarSign, badge: "pendingExpenses" },
+  { title: "External", url: "/external", icon: Handshake },
+  { title: "Contacts", url: "/contacts", icon: Contact },
+  { title: "Marketing", url: "/marketing", icon: Megaphone },
+  { title: "Reports", url: "/reports", icon: BarChart },
   { title: "Documents", url: "/documents", icon: FileText },
-  {
-    title: "Settings",
-    url: "/settings",
-    icon: Settings,
-    roles: ["Administrator"],
-  },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -94,7 +62,8 @@ export function AppSidebar() {
   const { expenses } = useFinance();
   const { events } = useEvents();
 
-  const filteredItems = items.filter((item) => !item.roles || item.roles.includes(role));
+  const filteredItems = items.filter((item) => canAccess(role, item.url));
+  const canSeeFinance = canAccess(role, "/finance");
 
   const now = new Date();
   const overdueTasks = tasks.filter((t) => t.dueDate && new Date(t.dueDate) < now && t.status !== "done").length;
@@ -107,7 +76,7 @@ export function AppSidebar() {
   const badges: Record<string, string | number> = {};
   if (overdueTasks > 0) badges.overdueTasks = overdueTasks;
   if (upcomingEvents > 0) badges.eventRisks = upcomingEvents;
-  if (pendingExpenses > 0) badges.pendingExpenses = pendingExpenses;
+  if (canSeeFinance && pendingExpenses > 0) badges.pendingExpenses = pendingExpenses;
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">

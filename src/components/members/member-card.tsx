@@ -30,8 +30,10 @@ const MEMBER_STATUSES = [
 interface MemberCardProps {
   member: Member
   onView: (member: Member) => void
-  onEdit: (member: Member) => void
-  onDelete: (id: string) => void
+  /** Omit to hide the Edit action (e.g. user lacks members.write). */
+  onEdit?: (member: Member) => void
+  /** Omit to hide the Remove action (e.g. user lacks members.remove). */
+  onDelete?: (id: string) => void
 }
 
 const statusMeta = (status: string) => MEMBER_STATUSES.find((s) => s.value === status)
@@ -56,13 +58,19 @@ export function MemberCard({ member, onView, onEdit, onDelete }: MemberCardProps
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onView(member) }}>
               <Eye className="h-4 w-4 mr-2" /> View Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(member) }}>
-              <Pencil className="h-4 w-4 mr-2" /> Edit
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); onDelete(member.id) }}>
-              <Trash2 className="h-4 w-4 mr-2" /> Remove
-            </DropdownMenuItem>
+            {onEdit && (
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(member) }}>
+                <Pencil className="h-4 w-4 mr-2" /> Edit
+              </DropdownMenuItem>
+            )}
+            {onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); onDelete(member.id) }}>
+                  <Trash2 className="h-4 w-4 mr-2" /> Remove
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

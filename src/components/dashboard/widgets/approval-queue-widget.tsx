@@ -4,6 +4,7 @@ import { DollarSign, Loader2, Check } from "lucide-react"
 import { ExpandableTile } from "../insights/expandable-tile"
 import { ApprovalsPanel } from "../insights/panels/approvals-panel"
 import { Button } from "@/components/ui/button"
+import type { ApprovalsInsight } from "../insights/types"
 
 interface ApprovalItem {
   id: string;
@@ -15,7 +16,7 @@ interface ApprovalItem {
 
 interface ApprovalQueueWidgetProps {
   pendingApprovals: ApprovalItem[];
-  insightData: any;
+  insightData: ApprovalsInsight | null;
   actioningId: string | null;
   onApprove: (id: string, type: "finance" | "reimbursement", e?: React.MouseEvent) => void;
 }

@@ -27,12 +27,11 @@ function ExecutiveDashboardContent() {
   const { events } = useEvents()
   const { user } = useAuth()
 
-  // Mock ID if user not logged in for demo purposes, 
-  // but in real app we'd use user.id
-  const userId = user?.id || "m1" 
+  // No fallback ID: without a signed-in user there are no "my" tasks/events.
+  const userId = user?.id ?? null
 
-  const myTasks = useMemo(() => tasks.filter(t => t.assignees.includes(userId)), [tasks, userId])
-  const myEvents = useMemo(() => events.filter(e => e.collaborators.includes(userId)), [events, userId])
+  const myTasks = useMemo(() => (userId ? tasks.filter(t => t.assignees.includes(userId)) : []), [tasks, userId])
+  const myEvents = useMemo(() => (userId ? events.filter(e => e.collaborators.includes(userId)) : []), [events, userId])
   const upcomingEvents = useMemo(() => events.filter(e => new Date(e.startDate) > new Date()).slice(0, 3), [events])
 
   const renderWidget = (id: string) => {

@@ -31,8 +31,10 @@ const MEMBER_STATUSES = [
 interface MemberRowProps {
   member: Member
   onView: (member: Member) => void
-  onEdit: (member: Member) => void
-  onDelete: (id: string) => void
+  /** Omit to hide the Edit action (e.g. user lacks members.write). */
+  onEdit?: (member: Member) => void
+  /** Omit to hide the Remove action (e.g. user lacks members.remove). */
+  onDelete?: (id: string) => void
 }
 
 const statusMeta = (status: string) => MEMBER_STATUSES.find((s) => s.value === status)
@@ -74,13 +76,19 @@ export function MemberRow({ member, onView, onEdit, onDelete }: MemberRowProps) 
             <DropdownMenuItem onClick={() => onView(member)}>
               <Eye className="h-4 w-4 mr-2" /> View Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onEdit(member)}>
-              <Pencil className="h-4 w-4 mr-2" /> Edit
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive" onClick={() => onDelete(member.id)}>
-              <Trash2 className="h-4 w-4 mr-2" /> Remove
-            </DropdownMenuItem>
+            {onEdit && (
+              <DropdownMenuItem onClick={() => onEdit(member)}>
+                <Pencil className="h-4 w-4 mr-2" /> Edit
+              </DropdownMenuItem>
+            )}
+            {onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-destructive" onClick={() => onDelete(member.id)}>
+                  <Trash2 className="h-4 w-4 mr-2" /> Remove
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </TableCell>

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom"
 import { useSponsors } from "@/context/sponsors-context"
 import { type InteractionType, TIER_CONFIG, INTERACTION_ICONS, type SponsorTier } from "@/components/external/types"
 import { cn } from "@/lib/utils"
+import { safeExternalUrl } from "@/lib/safe-url"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -118,7 +119,8 @@ export function ContactsPage() {
     tags: "",
   })
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [logError, setLogError] = useState<string | null>(null)
 
   // View Profile Sheet State
   const [viewOpen, setViewOpen] = useState(false)
@@ -127,7 +129,6 @@ export function ContactsPage() {
   // Edit Contact State
   const [editOpen, setEditOpen] = useState(false)
   const [editData, setEditData] = useState<any>(null)
-  const [editSuccess, setEditSuccess] = useState(false)
 
   const allContacts = useMemo(() => {
     return sponsors.flatMap(s =>
@@ -165,14 +166,19 @@ export function ContactsPage() {
 
   const handleSaveLog = async () => {
     if (!selectedContact || !formSummary.trim()) return
-    await addInteraction(selectedContact.sponsorId, {
-      id: crypto.randomUUID(),
-      type: formType,
-      date: new Date().toISOString().split("T")[0],
-      summary: formSummary.trim(),
-      contactId: selectedContact.id
-    })
-    setLogOpen(false)
+    setLogError(null)
+    try {
+      await addInteraction(selectedContact.sponsorId, {
+        id: crypto.randomUUID(),
+        type: formType,
+        date: new Date().toISOString().split("T")[0],
+        summary: formSummary.trim(),
+        contactId: selectedContact.id
+      })
+      setLogOpen(false)
+    } catch (err: any) {
+      setLogError(err?.message || "Failed to save interaction. Check permissions or network.")
+    }
   }
 
   const handleAddContact = async () => {
@@ -188,6 +194,13 @@ export function ContactsPage() {
       return
     }
 
+    const linkedInRaw = newContact.linkedIn.trim()
+    const linkedIn = linkedInRaw ? safeExternalUrl(linkedInRaw) : ""
+    if (linkedIn === null) {
+      setError("Please enter a valid http(s) LinkedIn URL.")
+      return
+    }
+
     const contactPayload = {
       id: crypto.randomUUID(),
       name: newContact.name,
@@ -195,11 +208,12 @@ export function ContactsPage() {
       email: newContact.email,
       phone: "",
       organization: newContact.organization,
-      linkedIn: newContact.linkedIn,
+      linkedIn,
       tags: newContact.tags.split(",").map(t => t.trim()).filter(Boolean),
       createdAt: new Date().toISOString().split("T")[0]
     }
 
+    setSaving(true)
     try {
       const existingSponsor = sponsors.find(s => s.company.toLowerCase() === newContact.organization.toLowerCase())
 
@@ -222,16 +236,13 @@ export function ContactsPage() {
         await addSponsor(newSponsor)
       }
 
-      setSuccess(true)
-      setTimeout(() => {
-        setAddOpen(false)
-        setTimeout(() => {
-          setSuccess(false)
-          setNewContact({ name: "", email: "", organization: "", title: "", linkedIn: "", tags: "" })
-        }, 400)
-      }, 2000)
+      // Only reached when the insert/update promise resolved without error.
+      setAddOpen(false)
+      setNewContact({ name: "", email: "", organization: "", title: "", linkedIn: "", tags: "" })
     } catch (err: any) {
-      setError(err.message || "Failed to save contact to database. Check permissions or network.")
+      setError(err?.message || "Failed to save contact to database. Check permissions or network.")
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -243,12 +254,14 @@ export function ContactsPage() {
   const handleOpenLog = (e: React.MouseEvent, contact: any) => {
     e.stopPropagation()
     setSelectedContact(contact)
+    setLogError(null)
     setFormType("email")
     setFormSummary("")
     setLogOpen(true)
   }
 
   const handleEditOpen = (contact: any) => {
+    setError(null)
     setEditData({
       ...contact,
       tags: contact.tags.join(", ")
@@ -268,26 +281,33 @@ export function ContactsPage() {
       return
     }
 
+    const linkedInRaw = (editData.linkedIn || "").trim()
+    const linkedIn = linkedInRaw ? safeExternalUrl(linkedInRaw) : ""
+    if (linkedIn === null) {
+      setError("Please enter a valid http(s) LinkedIn URL.")
+      return
+    }
+
+    // Strip view-only fields that were merged in from the parent sponsor
+    const { sponsorId, company: _company, tier: _tier, ...contactFields } = editData
     const updatedContact = {
-      ...editData,
+      ...contactFields,
+      linkedIn,
       tags: editData.tags.split(",").map((t: string) => t.trim()).filter(Boolean)
     }
 
+    setSaving(true)
     try {
-      await updateContact(editData.sponsorId, updatedContact)
-
-      setEditSuccess(true)
-      setTimeout(() => {
-        setEditOpen(false)
-        setTimeout(() => {
-          setEditSuccess(false)
-          if (viewContact?.id === updatedContact.id) {
-            setViewContact(updatedContact)
-          }
-        }, 400)
-      }, 2000)
+      await updateContact(sponsorId, updatedContact)
+      // Only reached when the update resolved without error.
+      setEditOpen(false)
+      if (viewContact?.id === updatedContact.id) {
+        setViewContact({ ...viewContact, ...updatedContact })
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to update contact. Check permissions or network.")
+      setError(err?.message || "Failed to update contact. Check permissions or network.")
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -375,13 +395,21 @@ export function ContactsPage() {
                     {contact.email && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Mail className="h-3.5 w-3.5" />
-                        <a href={`mailto:${contact.email}`} className="hover:text-primary transition-colors">{contact.email}</a>
+                        <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} className="hover:text-primary transition-colors">{contact.email}</a>
                       </div>
                     )}
-                    {contact.linkedIn && (
+                    {safeExternalUrl(contact.linkedIn) && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Linkedin className="h-3.5 w-3.5" />
-                        <a href={contact.linkedIn} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">Profile</a>
+                        <a
+                          href={safeExternalUrl(contact.linkedIn) ?? undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:text-primary transition-colors"
+                        >
+                          Profile
+                        </a>
                       </div>
                     )}
                   </div>
@@ -452,6 +480,11 @@ export function ContactsPage() {
                 onChange={(e) => setFormSummary(e.target.value)}
               />
             </div>
+            {logError && (
+              <div role="alert" className="text-xs text-red-400 bg-red-400/10 p-2 rounded border border-red-400/20">
+                {logError}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLogOpen(false)}>Cancel</Button>
@@ -535,14 +568,14 @@ export function ContactsPage() {
                       </div>
                       <div>
                         <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-tight">LinkedIn Profile</p>
-                        {viewContact.linkedIn ? (
+                        {safeExternalUrl(viewContact.linkedIn) ? (
                           <a
-                            href={viewContact.linkedIn}
+                            href={safeExternalUrl(viewContact.linkedIn) ?? undefined}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-sm font-medium hover:text-primary transition-colors underline-offset-4 hover:underline break-all"
                           >
-                            {viewContact.linkedIn.replace("https://", "")}
+                            {String(viewContact.linkedIn).replace(/^https?:\/\//, "")}
                           </a>
                         ) : (
                           <span className="text-sm font-medium text-muted-foreground italic">No LinkedIn URL</span>
@@ -600,12 +633,7 @@ export function ContactsPage() {
             </DialogTitle>
           </DialogHeader>
 
-          {editSuccess ? (
-            <div className="flex flex-col items-center justify-center py-8 space-y-3">
-              <CheckCircle2 className="h-16 w-16 text-emerald-400" />
-              <p className="text-xl font-bold">Changes Saved!</p>
-            </div>
-          ) : (
+          {(
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -658,12 +686,10 @@ export function ContactsPage() {
             </div>
           )}
 
-          {!editSuccess && (
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-              <Button onClick={handleSaveEdit}>Save Changes</Button>
-            </DialogFooter>
-          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveEdit} disabled={saving}>{saving ? "Saving..." : "Save Changes"}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -676,15 +702,7 @@ export function ContactsPage() {
             </DialogTitle>
           </DialogHeader>
 
-          {success ? (
-            <div className="flex flex-col items-center justify-center py-8 space-y-3 animate-in fade-in zoom-in duration-300">
-              <CheckCircle2 className="h-16 w-16 text-emerald-400" />
-              <div className="text-center">
-                <p className="text-xl font-bold">Success!</p>
-                <p className="text-sm text-muted-foreground">New contact has been added to the directory.</p>
-              </div>
-            </div>
-          ) : (
+          {(
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -766,12 +784,10 @@ export function ContactsPage() {
             </div>
           )}
 
-          {!success && (
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-              <Button onClick={handleAddContact}>Save Contact</Button>
-            </DialogFooter>
-          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={handleAddContact} disabled={saving}>{saving ? "Saving..." : "Save Contact"}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

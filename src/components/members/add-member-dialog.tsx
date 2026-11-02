@@ -57,6 +57,7 @@ export function AddMemberDialog({ open, onOpenChange, onAdd }: AddMemberDialogPr
   const [formEmail, setFormEmail] = useState("")
   const [formPhone, setFormPhone] = useState("")
   const [formRole, setFormRole] = useState<Role>("Executive")
+  const [formStatus, setFormStatus] = useState<Member["status"]>("active")
   const [formDept, setFormDept] = useState<string>(DEPARTMENTS[0])
   const [formYear, setFormYear] = useState<string>(YEARS[0])
 
@@ -75,8 +76,15 @@ export function AddMemberDialog({ open, onOpenChange, onAdd }: AddMemberDialogPr
 
     setUserSearchStatus("loading")
 
-    const raw = value.trim()
+    // Strip characters that have meaning in PostgREST filter syntax (",", "(", ")")
+    // and LIKE wildcards so user input can't alter the `.or()` filter.
+    const raw = value.trim().replace(/[,()%*\\]/g, " ").trim()
     const stripped = stripToUsername(raw)
+    if (!raw) {
+      setUserSearchResults([])
+      setUserSearchStatus("idle")
+      return
+    }
 
     const { data, error } = await supabase
       .from("socials")
@@ -123,7 +131,7 @@ export function AddMemberDialog({ open, onOpenChange, onAdd }: AddMemberDialogPr
       email: formEmail.trim(),
       phone: formPhone.trim(),
       role: formRole,
-      status: "active",
+      status: formStatus,
       joinDate: new Date().toISOString().split("T")[0],
       department: formDept,
       year: formYear,
@@ -139,6 +147,7 @@ export function AddMemberDialog({ open, onOpenChange, onAdd }: AddMemberDialogPr
     setFormEmail("")
     setFormPhone("")
     setFormRole("Executive")
+    setFormStatus("active")
     setFormDept(DEPARTMENTS[0])
     setFormYear(YEARS[0])
     setUserSearch("")
@@ -219,7 +228,7 @@ export function AddMemberDialog({ open, onOpenChange, onAdd }: AddMemberDialogPr
             </div>
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
-              <Select defaultValue="active">
+              <Select value={formStatus} onValueChange={(v) => setFormStatus(v as Member["status"])}>
                 <SelectTrigger id="status">
                   <SelectValue />
                 </SelectTrigger>
